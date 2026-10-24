@@ -1,0 +1,200 @@
+"""Kennzahlen pro Spiel und Vorhersage-Merkmale für Strategien.
+
+Für jedes Spiel werden die Merkmale nur aus den *vorherigen* Spielen beider Teams
+berechnet (gleicher Wettbewerb). So sieht ein Backtest nichts aus der Zukunft –
+mit einer Ausnahme: die xG-Quoten pro Zone werden aus allen Würfen geschätzt.
+"""
+from __future__ import annotations
+
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import datetime
+from statistics import mean, median
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from .config import PRIOR_WEIGHT_GAMES
+from .models import Competition, Game, Shot
+
+# Merkmale, die im Strategie-Baukasten wählbar sind: Schlüssel -> Beschreibung
+FEATURES: dict[str, str] = {
+    "pred_total": "Erwartete Tore gesamt (xG-Modell)",
+    "pred_total_goals": "Erwartete Tore gesamt (aus echten Toren)",
+    "pred_home": "Erwartete Tore Heim (xG)",
+    "pred_away": "Erwartete Tore Gast (xG)",
+    "pred_margin": "Erwartete Tordifferenz Heim − Gast (xG)",
+    "over_line": "Over-Linie (Tore)",
+    "pred_total_minus_line": "Erwartete Tore − Over-Linie",
+    "pred_margin_plus_hdp": "Erw. Differenz + Handicap Heim",
+    "odds_home": "Quote Heimsieg",
+    "odds_away": "Quote Auswärtssieg",
+    "odds_over": "Quote Over",
+    "home_games": "Heim: Spiele bisher",
+    "away_games": "Gast: Spiele bisher",
+}
+_TEAM_FEATURES = {
+    "avg_goals": "Ø Tore",
+    "avg_goals_against": "Ø Gegentore",
+    "avg_xg": "Ø xG",
+    "avg_xga": "Ø xG gegen",
+    "avg_total": "Ø Tore gesamt im Spiel",
+    "last5_xg_median": "Median xG letzte 5",
+    "last5_total_median": "Median Tore gesamt letzte 5",
+    "finishing": "Abschluss: Ø (Tore − xG)",
+    "keeper": "Torwart: Ø (xG gegen − Gegentore)",
+    "avg_attacks": "Ø Angriffe (Tempo)",
+    "xg_per_attack": "xG pro Angriff",
+    "over_hits_last5": "Over getroffen in letzten 5 (mit Linie)",
+    "prev_games": "Spiele aus der Vorsaison",
+    "weight_current": "Anteil aktuelle Saison an den Werten (0–1)",
+}
+for side, label in (("home", "Heim"), ("away", "Gast")):
+    for key, text in _TEAM_FEATURES.items():
+        FEATURES[f"{side}_{key}"] = f"{label}: {text}"
+
+
+@dataclass
+class TeamGame:
+    game_id: int
+    team_id: int
+    goals: int
+    goals_against: int
+    xg: float
+    xga: float
+    shots: int
+    attacks: int | None
+    over_line: float | None
+    start: datetime
+
+
+def team_game_stats(session: Session, competition_id: int | None = None) -> dict[int, list[TeamGame]]:
+    """Kennzahlen jedes Teams in jedem beendeten Spiel, chronologisch je Team."""
+    q = select(Game).where(Game.finished.is_(True), Game.shots_imported.is_(True)).order_by(Game.start_moscow)
+    if competition_id:
+        q = q.where(Game.competition_id == competition_id)
+    games = session.scalars(q).unique().all()
+
+    xg_rows = session.execute(
+        select(Shot.game_id, Shot.is_home, func.sum(Shot.xg), func.count()).group_by(Shot.game_id, Shot.is_home)
+    ).all()
+    agg = {(gid, home): (x or 0.0, n) for gid, home, x, n in xg_rows}
+
+    out: dict[int, list[TeamGame]] = defaultdict(list)
+    for g in games:
+        hx, hn = agg.get((g.id, True), (0.0, 0))
+        ax, an = agg.get((g.id, False), (0.0, 0))
+        line = g.line.over_line if g.line else None
+        out[g.home_team_id].append(TeamGame(g.id, g.home_team_id, g.home_score, g.away_score, hx, ax, hn, g.home_attacks, line, g.start_moscow))
+        out[g.away_team_id].append(TeamGame(g.id, g.away_team_id, g.away_score, g.home_score, ax, hx, an, g.away_attacks, line, g.start_moscow))
+    return out
+
+
+# Kennzahlen, die als Durchschnitt pro Spiel gebildet und mit der Vorsaison gemischt werden
+_PER_GAME = {
+    "avg_goals": lambda h: h.goals,
+    "avg_goals_against": lambda h: h.goals_against,
+    "avg_xg": lambda h: h.xg,
+    "avg_xga": lambda h: h.xga,
+    "avg_total": lambda h: h.goals + h.goals_against,
+    "finishing": lambda h: h.goals - h.xg,
+    "keeper": lambda h: h.xga - h.goals_against,
+}
+
+
+def _team_form(history: list[TeamGame], prior: list[TeamGame] | None = None, prior_weight: float = 0.0) -> dict:
+    """Form eines Teams vor einem Spiel.
+
+    Mit Vorsaison (``prior``) wird jeder Durchschnitt zur Vorsaison hin gezogen:
+    ``(Summe aktuell + k · Ø Vorsaison) / (Spiele aktuell + k)``. Nach wenigen Spielen
+    zählt die Vorsaison viel, später kaum noch. Die „letzten 5“ reichen dann in die
+    Vorsaison zurück, solange es in der aktuellen Saison weniger als 5 Spiele gibt.
+    """
+    prior = prior if prior and prior_weight > 0 else []
+    n, k = len(history), (prior_weight if prior else 0.0)
+    if not history and not prior:
+        return {"games": 0, "prev_games": 0}
+
+    form: dict = {"games": n, "prev_games": len(prior), "weight_current": n / (n + k) if n + k else None}
+    for key, value in _PER_GAME.items():
+        prior_mean = mean(value(h) for h in prior) if prior else 0.0
+        form[key] = (sum(value(h) for h in history) + k * prior_mean) / (n + k)
+
+    attacks = [h for h in history if h.attacks]
+    prior_attacks = [h for h in prior if h.attacks]
+    k_att = k if prior_attacks else 0.0
+    if attacks or prior_attacks:
+        pa = mean(h.attacks for h in prior_attacks) if prior_attacks else 0.0
+        px = mean(h.xg for h in prior_attacks) if prior_attacks else 0.0
+        form["avg_attacks"] = (sum(h.attacks for h in attacks) + k_att * pa) / (len(attacks) + k_att)
+        form["xg_per_attack"] = (sum(h.xg for h in attacks) + k_att * px) / (sum(h.attacks for h in attacks) + k_att * pa)
+    else:
+        form["avg_attacks"] = form["xg_per_attack"] = None
+
+    last5 = (prior + history)[-5:]
+    with_line = [h for h in last5 if h.over_line is not None]
+    form["last5_xg_median"] = median(h.xg for h in last5)
+    form["last5_total_median"] = median(h.goals + h.goals_against for h in last5)
+    form["over_hits_last5"] = sum(h.goals + h.goals_against > h.over_line for h in with_line) if with_line else None
+    return form
+
+
+def match_features(home: dict, away: dict, line=None) -> dict:
+    f: dict = {"home_games": home["games"], "away_games": away["games"]}
+    for side, form in (("home", home), ("away", away)):
+        for k, v in form.items():
+            if k != "games":
+                f[f"{side}_{k}"] = v
+    if home.get("avg_xg") is not None and away.get("avg_xg") is not None:
+        f["pred_home"] = (home["avg_xg"] + away["avg_xga"]) / 2
+        f["pred_away"] = (away["avg_xg"] + home["avg_xga"]) / 2
+        f["pred_total"] = f["pred_home"] + f["pred_away"]
+        f["pred_margin"] = f["pred_home"] - f["pred_away"]
+        f["pred_total_goals"] = (home["avg_goals"] + away["avg_goals_against"] + away["avg_goals"] + home["avg_goals_against"]) / 2
+    if line is not None:
+        f.update(over_line=line.over_line, hdp_line=line.hdp_line, odds_home=line.odds_home,
+                 odds_draw=line.odds_draw, odds_away=line.odds_away, odds_over=line.odds_over,
+                 odds_under=line.odds_under)
+        if line.over_line is not None and "pred_total" in f:
+            f["pred_total_minus_line"] = f["pred_total"] - line.over_line
+        if line.hdp_line is not None and "pred_margin" in f:
+            f["pred_margin_plus_hdp"] = f["pred_margin"] + line.hdp_line
+    return f
+
+
+def all_game_features(session: Session, competition_id: int | None = None,
+                      prior_weight: float | None = None) -> list[dict]:
+    """Merkmale für jedes Spiel (beendet und offen), jeweils mit Stand vor Anpfiff.
+
+    Ist für den Wettbewerb eine Vorsaison hinterlegt, fließen deren Spiele mit
+    ``prior_weight`` (Standard: PRIOR_WEIGHT_GAMES) in die Team-Merkmale ein.
+    """
+    if prior_weight is None:
+        prior_weight = PRIOR_WEIGHT_GAMES
+    comp = session.get(Competition, competition_id) if competition_id else None
+    prior_per_team: dict[int, list[TeamGame]] = {}
+    if comp and comp.previous_competition_id and prior_weight > 0:
+        prior_per_team = team_game_stats(session, comp.previous_competition_id)
+
+    per_team = team_game_stats(session, competition_id)
+    index = {tid: {tg.game_id: i for i, tg in enumerate(games)} for tid, games in per_team.items()}
+
+    q = select(Game).order_by(Game.start_moscow)
+    if competition_id:
+        q = q.where(Game.competition_id == competition_id)
+    rows = []
+    for g in session.scalars(q).unique():
+        def history(team_id):
+            games = per_team.get(team_id, [])
+            pos = index.get(team_id, {}).get(g.id)
+            if pos is not None:
+                return games[:pos]
+            # Offenes Spiel: alle Spiele vor dem Anpfiff
+            return [tg for tg in games if tg.start < g.start_moscow]
+
+        def form(team_id):
+            return _team_form(history(team_id), prior_per_team.get(team_id), prior_weight)
+
+        feats = match_features(form(g.home_team_id), form(g.away_team_id), g.line)
+        rows.append({"game": g, "features": feats})
+    return rows
