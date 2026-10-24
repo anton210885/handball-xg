@@ -1,11 +1,17 @@
-"""REST-API für die Oberfläche. Start: ``uvicorn app.main:app --reload`` im Ordner backend."""
+"""REST-API für die Oberfläche; liefert nach ``npm run build`` auch die Oberfläche selbst aus.
+
+Start: ``start.vbs`` (ohne Fenster) oder ``uvicorn app.main:app --port 8010`` im Ordner backend."""
 from __future__ import annotations
 
+import mimetypes
 import threading
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -398,3 +404,24 @@ def predictions(competition_id: int | None = None, session: Session = Depends(ge
                 for s in strats if strategies.matches(r["features"], s.rules, s.min_games)]
         out.append({**game_dict(r["game"], sums, r["features"]), "strategies": hits})
     return out
+
+
+# ---------- Gebaute Oberfläche (frontend/dist) ausliefern ----------
+# Nach „npm run build“ läuft alles über einen einzigen Prozess auf Port 8010.
+
+FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+# Windows liefert .js je nach Registry als text/plain – Browser starten Module dann nicht
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
+
+if FRONTEND_DIST.exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str):
+        if path.startswith("api/"):
+            _404()
+        file = FRONTEND_DIST / path
+        if path and file.is_file() and FRONTEND_DIST in file.resolve().parents:
+            return FileResponse(file)
+        return FileResponse(FRONTEND_DIST / "index.html")  # React Router übernimmt

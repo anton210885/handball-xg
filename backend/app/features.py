@@ -27,6 +27,17 @@ FEATURES: dict[str, str] = {
     "over_line": "Over-Linie (Tore)",
     "pred_total_minus_line": "Erwartete Tore − Over-Linie",
     "pred_margin_plus_hdp": "Erw. Differenz + Handicap Heim",
+    # Kennzahlen aus dem alten Notebook (handball.ipynb), dort mit Torwart-/Abschluss-Korrektur
+    "pred_home_gk": "Erw. Tore Heim mit Abschluss/Torwart (homeExpGoal_with_GK_power)",
+    "pred_away_gk": "Erw. Tore Gast mit Abschluss/Torwart (awayExpGoal_with_GK_power)",
+    "pred_total_gk": "Erw. Tore gesamt mit Abschluss/Torwart (Sum_expGoal_with_GK_power)",
+    "pred_margin_gk": "Erw. Differenz mit Abschluss/Torwart (difference_expGoals_with_GK_power)",
+    "pred_total_gk_minus_line": "Erw. Tore mit Abschluss/Torwart − Over-Linie (differenceSum_…_to_over)",
+    "power_rating": "Stärkeverhältnis erw. Tore Heim / Gast (powerRaiting_expGoals)",
+    "pred_total_gk_last5": "Erw. Tore gesamt mit Abschluss/Torwart, letzte 5 (last5_Games_Sum_expGoal_with_GK)",
+    "pred_total_gk_last5_minus_line": "… letzte 5 − Over-Linie (last5_Games_differenceSum_…_to_over)",
+    "avg_xg_sum_minus_line": "Ø xG Heim + Ø xG Gast − Over-Linie",
+    "last5_xg_sum_minus_line": "Median xG letzte 5 Heim + Gast − Over-Linie",
     "odds_home": "Quote Heimsieg",
     "odds_away": "Quote Auswärtssieg",
     "odds_over": "Quote Over",
@@ -41,6 +52,8 @@ _TEAM_FEATURES = {
     "avg_total": "Ø Tore gesamt im Spiel",
     "last5_xg_median": "Median xG letzte 5",
     "last5_total_median": "Median Tore gesamt letzte 5",
+    "last5_finishing_median": "Median Abschluss (Tore − xG) letzte 5",
+    "last5_keeper_median": "Median Torwart (xG gegen − Gegentore) letzte 5",
     "finishing": "Abschluss: Ø (Tore − xG)",
     "keeper": "Torwart: Ø (xG gegen − Gegentore)",
     "avg_attacks": "Ø Angriffe (Tempo)",
@@ -134,6 +147,8 @@ def _team_form(history: list[TeamGame], prior: list[TeamGame] | None = None, pri
     last5 = (prior + history)[-5:]
     with_line = [h for h in last5 if h.over_line is not None]
     form["last5_xg_median"] = median(h.xg for h in last5)
+    form["last5_finishing_median"] = median(h.goals - h.xg for h in last5)
+    form["last5_keeper_median"] = median(h.xga - h.goals_against for h in last5)
     form["last5_total_median"] = median(h.goals + h.goals_against for h in last5)
     form["over_hits_last5"] = sum(h.goals + h.goals_against > h.over_line for h in with_line) if with_line else None
     return form
@@ -151,12 +166,28 @@ def match_features(home: dict, away: dict, line=None) -> dict:
         f["pred_total"] = f["pred_home"] + f["pred_away"]
         f["pred_margin"] = f["pred_home"] - f["pred_away"]
         f["pred_total_goals"] = (home["avg_goals"] + away["avg_goals_against"] + away["avg_goals"] + home["avg_goals_against"]) / 2
+        f["power_rating"] = f["pred_home"] / f["pred_away"] if f["pred_away"] else None
+        # Wie im alten Notebook: erwartete Tore + eigener Abschluss (Tore − xG) + Torwartschwäche des
+        # Gegners (Gegentore − xG gegen = −keeper)
+        f["pred_home_gk"] = f["pred_home"] + home["finishing"] - away["keeper"]
+        f["pred_away_gk"] = f["pred_away"] + away["finishing"] - home["keeper"]
+        f["pred_total_gk"] = f["pred_home_gk"] + f["pred_away_gk"]
+        f["pred_margin_gk"] = f["pred_home_gk"] - f["pred_away_gk"]
+        # Dasselbe aus den Medianen der letzten 5 Spiele (last5_Games_…ExpGoal_with_GK)
+        f["pred_total_gk_last5"] = (
+            home["last5_xg_median"] + home["last5_finishing_median"] - away["last5_keeper_median"]
+            + away["last5_xg_median"] + away["last5_finishing_median"] - home["last5_keeper_median"]
+        )
     if line is not None:
         f.update(over_line=line.over_line, hdp_line=line.hdp_line, odds_home=line.odds_home,
                  odds_draw=line.odds_draw, odds_away=line.odds_away, odds_over=line.odds_over,
                  odds_under=line.odds_under)
         if line.over_line is not None and "pred_total" in f:
             f["pred_total_minus_line"] = f["pred_total"] - line.over_line
+            f["pred_total_gk_minus_line"] = f["pred_total_gk"] - line.over_line
+            f["pred_total_gk_last5_minus_line"] = f["pred_total_gk_last5"] - line.over_line
+            f["avg_xg_sum_minus_line"] = f["home_avg_xg"] + f["away_avg_xg"] - line.over_line
+            f["last5_xg_sum_minus_line"] = f["home_last5_xg_median"] + f["away_last5_xg_median"] - line.over_line
         if line.hdp_line is not None and "pred_margin" in f:
             f["pred_margin_plus_hdp"] = f["pred_margin"] + line.hdp_line
     return f

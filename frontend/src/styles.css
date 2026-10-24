@@ -78,6 +78,9 @@ button.secondary { background: var(--bg); color: var(--text); border: 1px solid 
 button.danger { background: var(--bad); }
 button:disabled { opacity: 0.5; cursor: default; }
 select, input { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
+/* lange Merkmalsnamen dürfen das Layout nicht aufsprengen */
+select { max-width: 100%; text-overflow: ellipsis; }
+.grid2 > *, .row > * { min-width: 0; }
 input.cell { width: 72px; padding: 4px 6px; text-align: right; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 

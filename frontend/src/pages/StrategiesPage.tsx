@@ -80,7 +80,7 @@ export default function StrategiesPage() {
         <div className="panel">
           <h2>{s.id ? "Strategie bearbeiten" : "Strategie bauen"}</h2>
           <div className="row" style={{ marginBottom: 10 }}>
-            <input placeholder="Name" value={s.name} onChange={(e) => setS({ ...s, name: e.target.value })} style={{ flex: 1 }} />
+            <input placeholder="Name" value={s.name} onChange={(e) => setS({ ...s, name: e.target.value })} style={{ flex: 1, minWidth: 180 }} />
             <select value={s.market} onChange={(e) => setS({ ...s, market: e.target.value })}>
               {Object.entries(meta.data?.markets ?? {}).map(([k, v]) => (
                 <option key={k} value={k}>{v}</option>
@@ -133,7 +133,7 @@ export default function StrategiesPage() {
               </div>
             )}
             <div className="small muted">
-              Ohne eingetragene Quote rechnet der Backtest mit 1,85. Wenige Wetten = wenig Aussagekraft.
+              Ohne eingetragene Quote rechnet der Backtest mit 1,80 (wie deine alte Auswertung). Wenige Wetten = wenig Aussagekraft.
             </div>
           </div>
 

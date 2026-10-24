@@ -35,4 +35,4 @@ KNOWN_COMPETITIONS = [
 PRIOR_WEIGHT_GAMES = float(os.getenv("PRIOR_WEIGHT_GAMES", "3"))
 
 # Standardquote, wenn für eine Wette keine Quote hinterlegt ist (für Backtests)
-DEFAULT_ODDS = 1.85
+DEFAULT_ODDS = 1.80  # wie in der alten Auswertung (Gewinn +0,8 je Treffer)

@@ -22,7 +22,7 @@ Die Rohdaten werden unter `backend/data/raw/` zwischengespeichert. Ein erneuter 
 Die Torquote wird pro **Feldzone × Angriffsart** (Positionsangriff / Umschalten) aus allen Würfen geschätzt. Seltene Kombinationen werden zur Zonenquote hin geglättet: `(Tore + k·Zonenquote) / (Würfe + k)`. Ein 7-m-Wurf hat eine eigene Quote.
 
 ### Strategien
-Eine Strategie besteht aus Regeln auf Merkmale, alle mit UND verknüpft. Beispiel: „Erwartete Tore − Over-Linie ≥ 2“. Die Merkmale kommen immer nur aus den Spielen **vor** dem jeweiligen Spiel. Der Backtest rechnet mit den eingetragenen Linien und Quoten, ohne Quote mit 1,85.
+Eine Strategie besteht aus Regeln auf Merkmale, alle mit UND verknüpft. Beispiel: „Erwartete Tore − Over-Linie ≥ 2“. Die Merkmale kommen immer nur aus den Spielen **vor** dem jeweiligen Spiel. Der Backtest rechnet mit den eingetragenen Linien und Quoten, ohne Quote mit 1,80.
 
 ### Quoten
 Die HandballAPI (RapidAPI) hat für die russische Superliga **keine Quoten**. Linien und Quoten trägst du auf der Seite „Linien & Quoten“ von Hand ein. Der API-Abruf ist für Ligen mit Quoten eingebaut, zum Beispiel die HBL.
@@ -40,11 +40,26 @@ npm install
 
 ## Starten
 
-Doppelklick auf `start.bat`. Das startet das Backend auf Port 8010 und die Oberfläche auf Port 5173 und öffnet dann http://localhost:5173.
+- **`start.vbs`** (Doppelklick): startet den Server unsichtbar im Hintergrund, **ohne Konsolenfenster**, und öffnet http://localhost:8010. Läuft er schon, wird nur der Browser geöffnet.
+- **`stop.vbs`** (Doppelklick): beendet den Server wieder.
+- Meldungen des Servers stehen in `backend/data/server.log`.
+
+Der Server liefert die fertig gebaute Oberfläche aus `frontend/dist` mit aus. Nach Änderungen an der Oberfläche einmal neu bauen:
+
+```bash
+cd frontend
+npm run build
+```
+
+Zum Entwickeln mit Live-Neuladen gibt es `start_entwicklung.bat`. Sie öffnet zwei Fenster (Backend und Vite) und startet die Oberfläche auf http://localhost:5173.
 
 ### Vorsaison
 Jeder Wettbewerb kann auf seine Vorsaison verweisen (Seite „Daten-Import“, Spalte „Vorsaison-ID“). Die Team-Werte werden dann zur Vorsaison hin gezogen: `(Summe aktuelle Spiele + k · Ø Vorsaison) / (Anzahl aktuelle Spiele + k)` mit k = 3 (`PRIOR_WEIGHT_GAMES`). Aufsteiger haben keine Vorsaison, für sie zählt nur die laufende Saison. Die Auswertung dazu: `.venv\Scripts\python scripts\evaluate_prior.py`.
 
 Importiert sind die Männer-Saisons 24/25 (`6597`), 25/26 (`7284`) und 26/27 (`8070`).
+
+### Übernahme aus der alten Access-Datenbank
+- `scripts/import_access_lines.py` übernimmt 1X2-Quoten, Over-Linie und Handicap aus `RusHandbal.accdb`. Die Datei wird nur gelesen; von Hand eingetragene Linien bleiben unangetastet. Zugeordnet wird über die Teams und das Datum (bis 4 Tage später, weil Access oft den Eingabetag enthält). Ein vorhandenes Ergebnis muss übereinstimmen.
+- `scripts/seed_old_strategies.py` legt die meistgenutzten Strategien aus `handball.ipynb` als „Alt: …“ an. Die alten Kennzahlen (`homeExpGoal_with_GK_power`, `difference_expGoals_with_GK_power`, `last5_Games_…` usw.) gibt es als Merkmale unter denselben Namen in Klammern.
 
 Tests: `cd backend && .venv\Scripts\python -m pytest`
