@@ -18,8 +18,9 @@ RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "")
 # OddsPapi (kostenlos: 250 Abfragen/Monat). Etwas Puffer lassen.
 ODDSPAPI_KEY = os.getenv("ODDSPAPI_KEY", "")
 ODDSPAPI_MONTHLY_BUDGET = int(os.getenv("ODDSPAPI_MONTHLY_BUDGET", "240"))
-# Historische Quoten liefern im kostenlosen Tarif höchstens 3 Buchmacher – diese führen Russland
-ODDSPAPI_BOOKMAKERS = os.getenv("ODDSPAPI_BOOKMAKERS", "superbet,vave,marathonbet")
+# Buchmacher für historische Quoten (max. 3). Kostenloser Tarif: alle, z. B. superbet,vave,marathonbet.
+# Bezahlte Tarife geben nur die gebuchten frei (sonst HTTP 403 „Restricted bookmaker“), z. B. 22bet.
+ODDSPAPI_BOOKMAKERS = os.getenv("ODDSPAPI_BOOKMAKERS", "superbet,vave,marathonbet").split("#")[0].strip()
 # Automatischer Abgleich: alle x Stunden; Vorab-Quoten für Spiele der nächsten x Tage
 ODDSPAPI_SYNC_HOURS = float(os.getenv("ODDSPAPI_SYNC_HOURS", "6"))
 ODDSPAPI_PREMATCH_DAYS = float(os.getenv("ODDSPAPI_PREMATCH_DAYS", "2"))
@@ -29,6 +30,8 @@ ODDSPAPI_PREMATCH_REFRESH_HOURS = float(os.getenv("ODDSPAPI_PREMATCH_REFRESH_HOU
 ODDSPAPI_TOURNAMENTS = {
     ("Russia", "Superliga", "men"): 1143,
     ("Russia", "Superliga", "women"): 1394,
+    ("Korea", "H League", "men"): 36187,
+    ("Korea", "H League", "women"): 38953,
 }
 # Hauptlinie: Over- und Under-Quote liegen beide in diesem Bereich
 MAIN_LINE_MIN_ODDS, MAIN_LINE_MAX_ODDS = 1.70, 2.00

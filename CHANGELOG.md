@@ -2,6 +2,10 @@
 
 Die Versionsnummer steht in `backend/app/__init__.py` und `frontend/package.json` (ein Test prüft, dass beide gleich sind). Sie wird im Seitenmenü und unter `/api/version` angezeigt.
 
+## 0.6.1 – 2026-10-25
+- Quoten von OddsPapi jetzt auch für die koreanische H-Liga (Männer 36187, Frauen 38953), automatisch ab Saison 26/27.
+- Buchmacher für historische Quoten einstellbar (`ODDSPAPI_BOOKMAKERS`); der Normal-Tarif gibt nur die gebuchten frei (22bet).
+
 ## 0.6.0 – 2026-10-25
 - **Koreanische H-Liga** von koreahandball.com: Spielplan und jeder einzelne Wurf aus dem Spielverlauf (Zone, Ergebnis, Werfer, Torwart, Vorlage), Männer und Frauen ab Saison 24/25. Mit den vorhandenen Access-Daten zusammengeführt: offizielle Ergebnisse und Anstoßzeiten, Linien aus Access bleiben erhalten.
 - xG für Korea pro Wurf statt „Würfe × Ligaschnitt“.

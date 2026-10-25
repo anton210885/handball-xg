@@ -29,7 +29,7 @@ Im Strategie-Baukasten lassen sich ein Quotenbereich (von/bis) und der feste Ein
 ### Quoten
 Die HandballAPI (RapidAPI) hat für die russische Superliga **keine Quoten**. Der API-Abruf ist für Ligen mit Quoten eingebaut, zum Beispiel die HBL.
 
-**OddsPapi** (`ODDSPAPI_KEY` in `backend/.env`, kostenlos 250 Abfragen/Monat) liefert für die Superliga Männer (Turnier 1143) und Frauen (1394) Quoten von bis zu 22 Buchmachern:
+**OddsPapi** (`ODDSPAPI_KEY` in `backend/.env`) liefert Quoten für die russische Superliga (Männer 1143, Frauen 1394) und die koreanische H-Liga (Männer 36187, Frauen 38953). Der kostenlose Tarif zeigt bis zu 22 Buchmacher; der bezahlte Normal-Tarif nur die gebuchten – derzeit **22bet** (`ODDSPAPI_BOOKMAKERS=22bet`, sonst HTTP 403 „Restricted bookmaker“). Historische Quoten gibt es erst ab Saison 26/27.
 - **Torlinie:** die Linie, bei der Over- und Under-Quote (Median über die Buchmacher) beide zwischen **1,70 und 2,00** liegen. Passen mehrere, gewinnt die mit den meisten Buchmachern, dann die ausgeglichenste. Passt keine, bleibt die Linie leer. Ebenso für das Handicap; dazu 1X2.
 - **Beendete Spiele:** Schlusskurse (letzter Preis vor Anpfiff) über die historischen Quoten, max. 3 Buchmacher (`ODDSPAPI_BOOKMAKERS`). Verfügbar ab Saison 26/27, für 25/26 hat OddsPapi nichts.
 - **Kommende Spiele:** Vorab-Quoten für die nächsten 2 Tage, höchstens alle `ODDSPAPI_PREMATCH_REFRESH_HOURS` Stunden neu (Standard 12, im Normal-Tarif 3); nach dem Spiel werden sie durch Schlusskurse ersetzt.
