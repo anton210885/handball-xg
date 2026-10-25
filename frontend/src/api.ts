@@ -73,6 +73,22 @@ export type Competition = {
 };
 
 // Entweder Merkmal + Vergleich + Wert, oder eine Formel wie "(home_expGoal + away_expGoal) + 2 > over"
+export type Coverage = {
+  id: number;
+  country: string | null;
+  league: string | null;
+  gender: string;
+  season: string;
+  finished: number;
+  open: number;
+  finished_no_line: number;
+  finished_no_1x2: number;
+  finished_no_hdp: number;
+  open_no_line: number;
+  open_no_1x2: number;
+  open_no_hdp: number;
+};
+
 export type Rule = { feature?: string; op?: string; value?: number; formula?: string };
 export type Strategy = { id?: number; name: string; market: string; rules: Rule[]; min_games: number; notes?: string | null; min_odds?: number | null; max_odds?: number | null; stake?: number };
 export type MetricDetails = { label: string; description: string; formula: string; source: string; timing: string };
@@ -142,6 +158,15 @@ const q = (params: Record<string, string | number | undefined | null>) => {
 
 export const api = {
   competitions: () => request<Competition[]>("/competitions"),
+  coverage: () => request<Coverage[]>("/coverage"),
+  oddspapiStatus: () =>
+    request<{ configured: boolean; used_this_month: number; budget: number; every_hours: number; running: boolean;
+      last_run: string | null; message: string }>("/oddspapi/status"),
+  oddspapiSync: (competition_id?: number) =>
+    request<{ reports?: any[]; calls?: number; used_this_month?: number; budget?: number; message?: string; error?: string }>(
+      `/oddspapi/sync${q({ competition_id })}`,
+      { method: "POST" },
+    ),
   addCompetition: (c: { id: number; name: string; season: string; gender: string }) =>
     request("/competitions", { method: "POST", body: JSON.stringify(c) }),
   patchCompetition: (id: number, body: Partial<Competition>) =>

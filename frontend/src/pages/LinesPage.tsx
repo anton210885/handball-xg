@@ -3,6 +3,7 @@ import { api, Game, Line } from "../api";
 import { useCompetition } from "../App";
 import { dateTime, fmt } from "../labels";
 import { useLoad } from "../useLoad";
+import CoverageTable from "../components/CoverageTable";
 
 const FIELDS: [keyof Line, string][] = [
   ["over_line", "Over-Linie"],
@@ -44,11 +45,31 @@ function LineInput({ game, field, onSaved }: { game: Game; field: keyof Line; on
 }
 
 export default function LinesPage() {
-  const { competitionId, competitions } = useCompetition();
+  const { competitionId, competitions, setCompetitionId } = useCompetition();
   const [status, setStatus] = useState("open");
   const { data, error, reload } = useLoad(() => api.games(competitionId, status || undefined), [competitionId, status]);
   const [oddsMsg, setOddsMsg] = useState<string | null>(null);
   const comp = competitions.find((c) => c.id === competitionId);
+
+  const papi = useLoad(() => api.oddspapiStatus(), []);
+  const [papiMsg, setPapiMsg] = useState<string | null>(null);
+  const syncOddsPapi = async () => {
+    setPapiMsg("Hole Quoten von OddsPapi … (kann einige Minuten dauern)");
+    try {
+      const r = await api.oddspapiSync(competitionId);
+      if (r.error) return setPapiMsg(r.error);
+      const sum = (k: string) => (r.reports ?? []).reduce((a, x) => a + (x[k] ?? 0), 0);
+      setPapiMsg(
+        `${sum("closing")} Spiele mit Schlusskursen, ${sum("prematch")} mit Vorab-Quoten, ` +
+          `${sum("no_data")} ohne Daten bei OddsPapi, ${sum("unmatched")} nicht zuordenbar. ` +
+          `${r.calls} Abfragen, Monat: ${r.used_this_month} von ${r.budget}. ${r.message === "fertig" ? "" : r.message ?? ""}`,
+      );
+      papi.reload();
+      reload();
+    } catch (e: any) {
+      setPapiMsg(`Fehler: ${e.message}`);
+    }
+  };
 
   const fetchOdds = async () => {
     if (!competitionId) return;
@@ -76,6 +97,13 @@ export default function LinesPage() {
             <option value="open">Offene Spiele</option>
             <option value="finished">Beendete Spiele (für Backtests)</option>
           </select>
+          <button
+            disabled={!papi.data?.configured || papi.data?.running}
+            title="Holt Torlinien (Regel 1,70–2,00), 1X2 und Handicap für diesen Wettbewerb von OddsPapi"
+            onClick={syncOddsPapi}
+          >
+            Quoten von OddsPapi holen
+          </button>
           <button className="secondary" disabled={!comp?.handballapi_tournament_id} onClick={fetchOdds}>
             Quoten von HandballAPI
           </button>
@@ -86,7 +114,21 @@ export default function LinesPage() {
         Werte eintippen, mit Enter oder Klick daneben wird gespeichert. Für die russische Superliga liefert die HandballAPI
         keine Quoten – hier also von Hand eintragen. Für Backtests braucht ein beendetes Spiel mindestens eine Over-Linie.
         {oddsMsg && <div style={{ marginTop: 6 }}>{oddsMsg}</div>}
+        {papi.data?.configured && (
+          <div style={{ marginTop: 6 }}>
+            OddsPapi: {papi.data.used_this_month} von {papi.data.budget} Abfragen diesen Monat verbraucht · automatischer
+            Abgleich alle {papi.data.every_hours} Stunden
+            {papi.data.last_run ? ` · zuletzt ${new Date(papi.data.last_run + "Z").toLocaleString("de-DE")}` : ""}
+          </div>
+        )}
+        {papiMsg && <div style={{ marginTop: 6 }}>{papiMsg}</div>}
       </div>
+      <CoverageTable
+        onPick={(id, st) => {
+          setCompetitionId(id);
+          setStatus(st);
+        }}
+      />
       <div className="panel table-wrap">
         <table>
           <thead>

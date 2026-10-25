@@ -38,6 +38,8 @@ class Team(Base):
     name_as_of: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Wie das Team bei der HandballAPI heißt (für den Quotenabgleich)
     handballapi_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Teilnehmer-ID bei OddsPapi, wird beim ersten sicheren Abgleich gemerkt
+    oddspapi_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Game(Base):
@@ -58,6 +60,11 @@ class Game(Base):
     away_ht: Mapped[int | None] = mapped_column(Integer, nullable=True)
     finished: Mapped[bool] = mapped_column(Boolean, default=False)
     shots_imported: Mapped[bool] = mapped_column(Boolean, default=False)
+    oddspapi_fixture_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # pre = Vorab-Quoten geholt, close = Schlusskurse geholt, none = OddsPapi hat keine Daten
+    oddspapi_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    # True, wenn Teilnehmer 1 bei OddsPapi unser Gastteam ist
+    oddspapi_swapped: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Ballbesitze laut rushandball (Angriffe), für Tempo-Kennzahlen
     home_attacks: Mapped[int | None] = mapped_column(Integer, nullable=True)
     away_attacks: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -144,3 +151,12 @@ class SourceRecord(Base):
     game_id: Mapped[int | None] = mapped_column(ForeignKey("games.id"), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String)
+
+
+class ApiUsage(Base):
+    """Abfragen je Anbieter und Monat – damit kostenlose Kontingente nicht überschritten werden."""
+
+    __tablename__ = "api_usage"
+    provider: Mapped[str] = mapped_column(String, primary_key=True)
+    month: Mapped[str] = mapped_column(String, primary_key=True)  # "2026-10"
+    calls: Mapped[int] = mapped_column(Integer, default=0)

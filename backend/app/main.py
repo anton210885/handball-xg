@@ -20,6 +20,9 @@ from . import features as feat
 from . import importer, strategies, xg
 from .db import SessionLocal, get_session, init_db
 from .legacy import LEGACY_NAMES
+from .config import ODDSPAPI_KEY, ODDSPAPI_SYNC_HOURS
+from . import oddspapi_sync
+from .sources import oddspapi as oddspapi_source
 from .models import Competition, Game, GameLine, Shot, Strategy, Team, AggregateStat, SourceRecord
 from .sources import handballapi
 
@@ -31,6 +34,8 @@ def startup():
     init_db()
     with SessionLocal() as s:
         importer.seed_known_competitions(s)
+    if ODDSPAPI_KEY:
+        oddspapi_sync.start_scheduler(SessionLocal, ODDSPAPI_SYNC_HOURS)
 
 
 # ---------- Hilfsfunktionen ----------
@@ -124,6 +129,48 @@ def list_competitions(session: Session = Depends(get_session)):
             "with_stats": sum(g.finished and g.home_score is not None and g.away_score is not None for g in games),
         })
     return out
+
+
+@app.get("/api/oddspapi/status")
+def oddspapi_status(session: Session = Depends(get_session)):
+    return {"configured": bool(ODDSPAPI_KEY), "used_this_month": oddspapi_source.usage(session),
+            "budget": oddspapi_source.ODDSPAPI_MONTHLY_BUDGET, "every_hours": ODDSPAPI_SYNC_HOURS,
+            **{k: v for k, v in oddspapi_sync.STATUS.items() if k != "result"},
+            "last_result": oddspapi_sync.STATUS.get("result")}
+
+
+@app.post("/api/oddspapi/sync")
+def oddspapi_run(competition_id: int | None = None, session: Session = Depends(get_session)):
+    if not ODDSPAPI_KEY:
+        raise HTTPException(400, "ODDSPAPI_KEY fehlt in backend/.env")
+    return oddspapi_sync.sync_all(session, [competition_id] if competition_id else None)
+
+
+@app.get("/api/coverage")
+def line_coverage(session: Session = Depends(get_session)):
+    """Wie viele Spiele je Wettbewerb ohne Torlinie, 1X2-Quoten oder Handicap sind.
+
+    Die Over/Under-Quote wird nicht gezählt: Dort steht vielfach nur der Platzhalter 1,80.
+    """
+    from .pregame import league_key
+
+    out = []
+    for c in session.scalars(select(Competition)).all():
+        key, _ = league_key(c)
+        country, league = key if isinstance(key, tuple) else (c.country, key)
+        row = {"id": c.id, "country": country, "league": league, "gender": c.gender, "season": c.season,
+               "finished": 0, "open": 0}
+        for status in ("finished", "open"):
+            row.update({f"{status}_no_line": 0, f"{status}_no_1x2": 0, f"{status}_no_hdp": 0})
+        for g in session.scalars(select(Game).where(Game.competition_id == c.id)).unique():
+            status = "finished" if g.finished else "open"
+            line = g.line
+            row[status] += 1
+            row[f"{status}_no_line"] += not (line and line.over_line is not None)
+            row[f"{status}_no_1x2"] += not (line and line.odds_home and line.odds_away)
+            row[f"{status}_no_hdp"] += not (line and line.hdp_line is not None)
+        out.append(row)
+    return sorted(out, key=lambda r: (r["country"] or "", r["league"] or "", r["gender"] or "", r["season"] or ""))
 
 
 @app.post("/api/competitions")
