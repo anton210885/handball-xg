@@ -1,8 +1,23 @@
 import { Link } from "react-router-dom";
-import { api } from "../api";
+import { api, Line } from "../api";
 import { useCompetition } from "../App";
 import { dateTime, fmt } from "../labels";
 import { useLoad } from "../useLoad";
+
+const SOURCE: Record<string, string> = {
+  "oddspapi-pre": "OddsPapi (vor dem Spiel)",
+  "oddspapi-close": "OddsPapi (Schlusskurs)",
+  access: "Access",
+  manual: "von Hand",
+  handballapi: "HandballAPI",
+};
+
+/** Quelle und Stand der Quoten als Tooltip. */
+function lineTitle(line: Line | null) {
+  if (!line) return "keine Quoten";
+  const when = line.updated_at ? new Date(line.updated_at + "Z").toLocaleString("de-DE") : "";
+  return `${SOURCE[line.source ?? ""] ?? line.source ?? ""}${when ? ` · Stand ${when}` : ""}`;
+}
 
 export default function PredictionsPage() {
   const { competitionId } = useCompetition();
@@ -13,7 +28,10 @@ export default function PredictionsPage() {
     <>
       <div className="topbar">
         <h1>Prognosen</h1>
-        <span className="muted small">Nächste offene Spiele · Werte aus den bisherigen Spielen beider Teams</span>
+        <span className="muted small">
+          Nächste offene Spiele · Werte aus den bisherigen Spielen beider Teams · Quoten, sobald vorhanden (Maus über
+          eine Quote zeigt Quelle und Stand)
+        </span>
       </div>
       {error && <div className="error">{error}</div>}
       {loading && <div className="muted">Lade …</div>}
@@ -29,12 +47,24 @@ export default function PredictionsPage() {
               <th className="num">erw. gesamt</th>
               <th className="num">Over-Linie</th>
               <th className="num">Differenz</th>
+              <th className="num">Over</th>
+              <th className="num">Under</th>
+              <th className="num">1</th>
+              <th className="num">X</th>
+              <th className="num">2</th>
+              <th className="num">Handicap</th>
               <th>Strategien</th>
             </tr>
           </thead>
           <tbody>
             {games.map((g) => {
               const diff = g.features?.pred_total_minus_line;
+              const line = g.line;
+              // Over/Under-Quote nur zusammen mit einer Linie zeigen (sonst ist es der Platzhalter 1,80)
+              const hasLine = line?.over_line !== null && line?.over_line !== undefined;
+              const odds = (v: number | null | undefined) => (
+                <td className="num" title={lineTitle(line)}>{v ? fmt(v, 2) : "–"}</td>
+              );
               return (
                 <tr key={g.id}>
                   <td>{dateTime(g.start)}</td>
@@ -51,6 +81,14 @@ export default function PredictionsPage() {
                   <td className="num">{fmt(g.line?.over_line)}</td>
                   <td className={`num ${diff && diff > 0 ? "pos" : diff && diff < 0 ? "neg" : ""}`}>
                     {diff !== undefined && diff !== null ? (diff > 0 ? "+" : "") + fmt(diff) : "–"}
+                  </td>
+                  {odds(hasLine ? line?.odds_over : null)}
+                  {odds(hasLine ? line?.odds_under : null)}
+                  {odds(line?.odds_home)}
+                  {odds(line?.odds_draw)}
+                  {odds(line?.odds_away)}
+                  <td className="num" title={lineTitle(line)}>
+                    {line?.hdp_line !== null && line?.hdp_line !== undefined ? (line.hdp_line > 0 ? "+" : "") + fmt(line.hdp_line) : "–"}
                   </td>
                   <td>
                     {g.strategies.map((s) => (

@@ -9,6 +9,7 @@ export type Line = {
   odds_over: number | null;
   odds_under: number | null;
   source?: string;
+  updated_at?: string | null;
 };
 
 export type Game = {

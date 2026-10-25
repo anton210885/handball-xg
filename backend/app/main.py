@@ -69,6 +69,7 @@ def game_dict(g: Game, xg_sums: dict | None = None, features: dict | None = None
     if g.line:
         d["line"] = {k: getattr(g.line, k) for k in
                      ("over_line", "hdp_line", "odds_home", "odds_draw", "odds_away", "odds_over", "odds_under", "source")}
+        d["line"]["updated_at"] = g.line.updated_at.isoformat() if g.line.updated_at else None
     if xg_sums is not None:
         d["home_xg"] = _num(xg_sums.get((g.id, True)))
         d["away_xg"] = _num(xg_sums.get((g.id, False)))
