@@ -37,7 +37,7 @@ Die HandballAPI (RapidAPI) hat für die russische Superliga **keine Quoten**. De
 - **Sparsam:** Jede Abfrage wird in der Tabelle `api_usage` gezählt; bei `ODDSPAPI_MONTHLY_BUDGET` ist Schluss (Standard 240 für den kostenlosen Tarif; im Normal-Tarif mit 5.000 Abfragen steht in `backend/.env` 4800, dazu `ODDSPAPI_SYNC_HOURS=3` und `ODDSPAPI_PREMATCH_REFRESH_HOURS=3`). Spiellisten vergangener Zeiträume und historische Quoten werden unter `data/raw/oddspapi/` zwischengespeichert, Spiele ohne Daten nicht erneut abgefragt.
 - Von Hand eingetragene Linien werden nie überschrieben; der Platzhalter 1,80 ohne Linie schon.
 
-Alles Übrige trägst du auf der Seite „Linien & Quoten“ von Hand ein.
+Alles Übrige trägst du auf der Seite „Linien & Quoten“ von Hand ein – am schnellsten mit **„Einfügen“**: Auf einer Quotenseite die Tabelle markieren und kopieren (Over/Under, Asian Handicap und/oder 1X2, auch alles zusammen), im Dialog einfügen. Das Tool liest Linien und Dezimalquoten nach Mustern (unabhängig vom Layout), nimmt den Median über die Buchmacher, wählt die Torlinie mit beiden Quoten zwischen 1,70 und 2,00 (ebenso das Handicap) und zeigt eine Vorschau. „Übernehmen“ speichert als Handeintrag (wird vom automatischen Abgleich nicht überschrieben) und öffnet das nächste Spiel ohne Linie. Automatisches Auslesen von oddsportal ist dort laut Nutzungsbedingungen nicht erlaubt; das Einfügen von Hand ist es.
 
 ## Einrichten (einmalig)
 

@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import features as feat
+from . import odds_paste
 from . import importer, strategies, xg
 from .db import SessionLocal, get_session, init_db
 from . import __version__
@@ -282,6 +283,29 @@ class LineIn(BaseModel):
     odds_away: float | None = None
     odds_over: float | None = None
     odds_under: float | None = None
+
+
+class PasteIn(BaseModel):
+    text: str
+    save: bool = False
+
+
+@app.post("/api/games/{game_id}/paste-odds")
+def paste_odds(game_id: int, body: PasteIn, session: Session = Depends(get_session)):
+    """Eingefügte Quotentabelle auswerten (Vorschau) und auf Wunsch speichern."""
+    g = session.get(Game, game_id) or _404()
+    result = odds_paste.parse(body.text)
+    fields = ("over_line", "odds_over", "odds_under", "hdp_line", "odds_home", "odds_draw", "odds_away")
+    found = {k: result[k] for k in fields if result.get(k) is not None}
+    if body.save and found:
+        line = g.line or GameLine(game_id=game_id)
+        for k, v in found.items():
+            setattr(line, k, v)
+        # Von Hand übernommene Werte: der automatische Abgleich überschreibt sie nicht
+        line.source, line.updated_at = "manual", datetime.utcnow()
+        session.add(line)
+        session.commit()
+    return {**result, "saved": bool(body.save and found), "found": found}
 
 
 @app.put("/api/games/{game_id}/line")

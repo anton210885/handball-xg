@@ -4,6 +4,7 @@ import { useCompetition } from "../App";
 import { dateTime, fmt } from "../labels";
 import { useLoad } from "../useLoad";
 import CoverageTable from "../components/CoverageTable";
+import PasteOddsDialog from "../components/PasteOddsDialog";
 
 const FIELDS: [keyof Line, string][] = [
   ["over_line", "Over-Linie"],
@@ -87,6 +88,7 @@ export default function LinesPage() {
   };
 
   const games = status === "finished" ? [...(data ?? [])].reverse() : data ?? [];
+  const [pasteFor, setPasteFor] = useState<number | null>(null);
 
   return (
     <>
@@ -133,6 +135,7 @@ export default function LinesPage() {
         <table>
           <thead>
             <tr>
+              <th></th>
               <th>Datum (MSK)</th>
               <th>Spiel</th>
               <th className="num">Prognose</th>
@@ -146,7 +149,13 @@ export default function LinesPage() {
           </thead>
           <tbody>
             {games.map((g) => (
-              <tr key={g.id}>
+              // Schlüssel mit Stand der Linie: nach dem Einfügen zeigen die Felder die neuen Werte
+              <tr key={`${g.id}-${g.line?.updated_at ?? ""}`}>
+                <td>
+                  <button className="secondary" title="Quotentabelle einfügen" onClick={() => setPasteFor(g.id)}>
+                    Einfügen
+                  </button>
+                </td>
                 <td>{dateTime(g.start)}</td>
                 <td>
                   {g.home.name} – {g.away.name}
@@ -163,6 +172,9 @@ export default function LinesPage() {
           </tbody>
         </table>
       </div>
+      {pasteFor !== null && (
+        <PasteOddsDialog games={games} startId={pasteFor} onClose={() => setPasteFor(null)} onSaved={reload} />
+      )}
     </>
   );
 }

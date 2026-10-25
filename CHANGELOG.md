@@ -2,6 +2,9 @@
 
 Die Versionsnummer steht in `backend/app/__init__.py` und `frontend/package.json` (ein Test prüft, dass beide gleich sind). Sie wird im Seitenmenü und unter `/api/version` angezeigt.
 
+## 0.7.0 – 2026-10-25
+- **Quotentabelle einfügen** auf „Linien & Quoten“: Tabelle einer Quotenseite (Over/Under, Asian Handicap, 1X2) kopieren und einfügen; das Tool erkennt alle Linien, nimmt die Torlinie mit beiden Quoten zwischen 1,70 und 2,00, zeigt eine Vorschau und springt nach dem Speichern zum nächsten Spiel ohne Linie.
+
 ## 0.6.1 – 2026-10-25
 - Quoten von OddsPapi jetzt auch für die koreanische H-Liga (Männer 36187, Frauen 38953), automatisch ab Saison 26/27.
 - Buchmacher für historische Quoten einstellbar (`ODDSPAPI_BOOKMAKERS`); der Normal-Tarif gibt nur die gebuchten frei (22bet).

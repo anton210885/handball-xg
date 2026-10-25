@@ -90,6 +90,14 @@ export type Coverage = {
   open_no_hdp: number;
 };
 
+export type PasteResult = {
+  lines: { line: number; a: number; b: number; count: number }[];
+  handicaps: { line: number; a: number; b: number; count: number }[];
+  warnings: string[];
+  found: Partial<Record<"over_line" | "odds_over" | "odds_under" | "hdp_line" | "odds_home" | "odds_draw" | "odds_away", number>>;
+  saved: boolean;
+};
+
 export type Rule = { feature?: string; op?: string; value?: number; formula?: string };
 export type Strategy = { id?: number; name: string; market: string; rules: Rule[]; min_games: number; notes?: string | null; min_odds?: number | null; max_odds?: number | null; stake?: number };
 export type MetricDetails = { label: string; description: string; formula: string; source: string; timing: string };
@@ -179,6 +187,8 @@ export const api = {
   games: (competition_id?: number, status?: string) => request<Game[]>(`/games${q({ competition_id, status })}`),
   game: (id: number) => request<GameDetail>(`/games/${id}`),
   setLine: (id: number, line: Partial<Line>) => request(`/games/${id}/line`, { method: "PUT", body: JSON.stringify(line) }),
+  pasteOdds: (id: number, text: string, save: boolean) =>
+    request<PasteResult>(`/games/${id}/paste-odds`, { method: "POST", body: JSON.stringify({ text, save }) }),
 
   teams: (competition_id?: number) => request<any[]>(`/teams${q({ competition_id })}`),
   xgModel: (shrinkage: number) => request<any>(`/xg/model${q({ shrinkage })}`),
