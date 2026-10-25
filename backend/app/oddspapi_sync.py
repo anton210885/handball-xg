@@ -24,13 +24,14 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .config import ODDSPAPI_BOOKMAKERS, ODDSPAPI_PREMATCH_DAYS, ODDSPAPI_TOURNAMENTS
+from .config import (ODDSPAPI_BOOKMAKERS, ODDSPAPI_PREMATCH_DAYS, ODDSPAPI_PREMATCH_REFRESH_HOURS,
+                     ODDSPAPI_TOURNAMENTS)
 from .models import Competition, Game, GameLine, Team
 from .sources import oddspapi
 
 log = logging.getLogger(__name__)
 MSK = timezone(timedelta(hours=3))
-PREMATCH_REFRESH = timedelta(hours=12)
+PREMATCH_REFRESH = timedelta(hours=ODDSPAPI_PREMATCH_REFRESH_HOURS)
 _lock = threading.Lock()
 STATUS: dict = {"running": False, "last_run": None, "message": "", "calls": 0}
 

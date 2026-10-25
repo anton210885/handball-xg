@@ -32,9 +32,9 @@ Die HandballAPI (RapidAPI) hat für die russische Superliga **keine Quoten**. De
 **OddsPapi** (`ODDSPAPI_KEY` in `backend/.env`, kostenlos 250 Abfragen/Monat) liefert für die Superliga Männer (Turnier 1143) und Frauen (1394) Quoten von bis zu 22 Buchmachern:
 - **Torlinie:** die Linie, bei der Over- und Under-Quote (Median über die Buchmacher) beide zwischen **1,70 und 2,00** liegen. Passen mehrere, gewinnt die mit den meisten Buchmachern, dann die ausgeglichenste. Passt keine, bleibt die Linie leer. Ebenso für das Handicap; dazu 1X2.
 - **Beendete Spiele:** Schlusskurse (letzter Preis vor Anpfiff) über die historischen Quoten, max. 3 Buchmacher (`ODDSPAPI_BOOKMAKERS`). Verfügbar ab Saison 26/27, für 25/26 hat OddsPapi nichts.
-- **Kommende Spiele:** Vorab-Quoten für die nächsten 2 Tage, höchstens alle 12 Stunden neu; nach dem Spiel werden sie durch Schlusskurse ersetzt.
+- **Kommende Spiele:** Vorab-Quoten für die nächsten 2 Tage, höchstens alle `ODDSPAPI_PREMATCH_REFRESH_HOURS` Stunden neu (Standard 12, im Normal-Tarif 3); nach dem Spiel werden sie durch Schlusskurse ersetzt.
 - **Automatisch:** Der Server gleicht alle 6 Stunden ab (`ODDSPAPI_SYNC_HOURS`), nur Saisons mit offenen Spielen. Zusätzlich gibt es den Knopf auf „Linien & Quoten“ und `scripts\sync_oddspapi.py`.
-- **Sparsam:** Jede Abfrage wird in der Tabelle `api_usage` gezählt; bei `ODDSPAPI_MONTHLY_BUDGET` (240) ist Schluss. Spiellisten vergangener Zeiträume und historische Quoten werden unter `data/raw/oddspapi/` zwischengespeichert, Spiele ohne Daten nicht erneut abgefragt.
+- **Sparsam:** Jede Abfrage wird in der Tabelle `api_usage` gezählt; bei `ODDSPAPI_MONTHLY_BUDGET` ist Schluss (Standard 240 für den kostenlosen Tarif; im Normal-Tarif mit 5.000 Abfragen steht in `backend/.env` 4800, dazu `ODDSPAPI_SYNC_HOURS=3` und `ODDSPAPI_PREMATCH_REFRESH_HOURS=3`). Spiellisten vergangener Zeiträume und historische Quoten werden unter `data/raw/oddspapi/` zwischengespeichert, Spiele ohne Daten nicht erneut abgefragt.
 - Von Hand eingetragene Linien werden nie überschrieben; der Platzhalter 1,80 ohne Linie schon.
 
 Alles Übrige trägst du auf der Seite „Linien & Quoten“ von Hand ein.

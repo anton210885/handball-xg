@@ -23,6 +23,8 @@ ODDSPAPI_BOOKMAKERS = os.getenv("ODDSPAPI_BOOKMAKERS", "superbet,vave,marathonbe
 # Automatischer Abgleich: alle x Stunden; Vorab-Quoten für Spiele der nächsten x Tage
 ODDSPAPI_SYNC_HOURS = float(os.getenv("ODDSPAPI_SYNC_HOURS", "6"))
 ODDSPAPI_PREMATCH_DAYS = float(os.getenv("ODDSPAPI_PREMATCH_DAYS", "2"))
+# Vorab-Quoten eines Spiels frühestens nach x Stunden erneut holen
+ODDSPAPI_PREMATCH_REFRESH_HOURS = float(os.getenv("ODDSPAPI_PREMATCH_REFRESH_HOURS", "12"))
 # (Land, Liga, Geschlecht) -> OddsPapi-Turnier
 ODDSPAPI_TOURNAMENTS = {
     ("Russia", "Superliga", "men"): 1143,
