@@ -9,6 +9,12 @@ export const ZONE_LABEL: Record<string, string> = {
   long_center: "Rückraum Mitte",
   long_right: "Rückraum rechts",
   "7m": "7 m",
+  // Zonen der koreanischen Liga (ohne links/rechts)
+  wing: "Außen",
+  long: "Rückraum (9 m)",
+  breakthrough: "Durchbruch",
+  fastbreak: "Gegenstoß",
+  empty_goal: "Leeres Tor",
 };
 
 export const GOAL_ZONES = [

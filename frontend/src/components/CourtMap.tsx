@@ -13,6 +13,12 @@ const POS: Record<string, [number, number]> = {
   long_center: [200, 240],
   long_right: [330, 215],
   "7m": [352, 270],
+  // Korea: Zonen ohne Seite; Gegenstoß und leeres Tor unten links
+  wing: [32, 48],
+  long: [200, 240],
+  breakthrough: [200, 138],
+  fastbreak: [48, 270],
+  empty_goal: [130, 270],
 };
 
 /** Wurfkarte: Kreisgröße = Würfe, Farbe = Tore im Vergleich zu xG (grün = besser als erwartet). */

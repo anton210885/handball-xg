@@ -85,6 +85,13 @@ Pearson-Korrelationen zeigen den Zusammenhang zwischen jeder verfügbaren numeri
 
 Zusätzlich sind Home-Quote Min/Max und Away-Quote Min/Max unabhängig vom gewählten Wettmarkt optional einstellbar. Jede Grenze kann einzeln gesetzt werden. Weitere Metrikbedingungen (Merkmal, Vergleich, Wert) und Formeln lassen sich wie im Strategie-Baukasten ergänzen und entfernen. Alle gesetzten Filter werden mit UND vor Profitberechnung, zeitlicher Aufteilung und Korrelationsanalyse angewendet. Fehlende Quoten/Metriken schließen ein Spiel nur dann aus, wenn die jeweilige zusätzliche Bedingung sie benötigt.
 
+### Korea (H-Liga, koreahandball.com)
+`scripts\import_korea.py` (optional mit Saison, z. B. `2026` = 26/27) lädt ab 24/25 Männer und Frauen von koreahandball.com: Spielplan (Hauptrunde und Playoffs) und aus jedem Spielbericht den **Spielverlauf mit jedem Wurf** – Zone (6 m, Außen, 9 m, 7 m, Gegenstoß, Durchbruch, leeres Tor), Ergebnis (Tor, gehalten, vorbei, Pfosten, Block), Werfer, Torwart und Vorlage. Der Werfer wird über den Kader dem Team zugeordnet (geblockte Würfe stehen im Verlauf teils beim Gegner).
+- **Prüfung:** Würfe werden übernommen, wenn sie die offiziellen Zonensummen exakt treffen oder – weil auch die offizielle Zonenaufteilung nicht immer vollständig ist – die Tore je Team genau und die Würfe höchstens 2 abweichen (markiert). 24/25 und 25/26: 283 exakt, 42 mit kleiner Abweichung, 7 ohne Würfe (im Verlauf fehlt ein Tor).
+- **Zusammenführung** mit den Access-Daten („Korea · H League“): gleiche Wettbewerbe und Teams (koreanische Namen → englische Namen, `TEAM_NAMES`), doppelt angelegte Teams zusammengelegt. Ein vorhandenes Spiel (gleiche Teams, ±2 Tage) bekommt offizielles Ergebnis, Anstoßzeit und Würfe; seine Linien bleiben. Ein Spiel wird nie zwei koreanischen Spielen zugeordnet (wichtig bei Playoff-Serien).
+- **Kommende Spiele** (noch ohne Spielbericht) werden über Datum und Teams angelegt und später ergänzt; Playoff-Platzhalter („정규 1위“) erst, wenn die Teams feststehen.
+- Abrufe mit 1 s Pause, Seiten unter `data/raw/koreahandball/` zwischengespeichert. `robots.txt` erlaubt den Zugriff.
+
 ### Frauen-Superliga
 Angelegt sind 24/25 (6604, gesamte Saison), 25/26 (7286, gesamte Saison) und 26/27 (8078, Vorrunde), jeweils mit Vorsaison-Verknüpfung. `scripts/import_women_access_lines.py` liest die alte Access-Datei ausschließlich lesend und ergänzt verfügbare Frauen-Quoten und Torlinien. Die Zuordnung erfordert beide Teams, ein Datum im bestehenden Importfenster und Übereinstimmung mit dem Endergebnis. Einträge ohne Ergebnis werden ausgelassen. Mehrdeutige Treffer werden ausgelassen; vorhandene Werte werden nicht überschrieben.
 

@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from . import features as feat
 from . import importer, strategies, xg
 from .db import SessionLocal, get_session, init_db
+from . import __version__
 from .legacy import LEGACY_NAMES
 from .config import ODDSPAPI_KEY, ODDSPAPI_SYNC_HOURS
 from . import oddspapi_sync
@@ -26,7 +27,7 @@ from .sources import oddspapi as oddspapi_source
 from .models import Competition, Game, GameLine, Shot, Strategy, Team, AggregateStat, SourceRecord
 from .sources import handballapi
 
-app = FastAPI(title="Handball xG")
+app = FastAPI(title="Handball xG", version=__version__)
 
 
 @app.on_event("startup")
@@ -130,6 +131,11 @@ def list_competitions(session: Session = Depends(get_session)):
             "with_stats": sum(g.finished and g.home_score is not None and g.away_score is not None for g in games),
         })
     return out
+
+
+@app.get("/api/version")
+def version():
+    return {"version": __version__}
 
 
 @app.get("/api/oddspapi/status")
@@ -416,7 +422,7 @@ def fetch_odds(body: OddsFetchIn, session: Session = Depends(get_session)):
 @app.get("/api/meta")
 def meta():
     from .metric_docs import metric_docs
-    return {"features": feat.FEATURES, "markets": strategies.MARKETS, "ops": list(strategies.OPS),
+    return {"version": __version__, "features": feat.FEATURES, "markets": strategies.MARKETS, "ops": list(strategies.OPS),
             "legacy_names": LEGACY_NAMES, "feature_details": metric_docs()}
 
 

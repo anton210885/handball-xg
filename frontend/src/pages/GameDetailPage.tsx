@@ -31,7 +31,7 @@ export default function GameDetailPage() {
           <div className="score">{g.finished ? `${g.home_score} : ${g.away_score}` : "–"}</div>
           <div className="muted">
             xG {fmt(g.home_xg)} : {fmt(g.away_xg)}
-            {g.finished && ` · HZ ${g.home_ht}:${g.away_ht}`}
+            {g.finished && g.home_ht !== null && g.away_ht !== null && ` · HZ ${g.home_ht}:${g.away_ht}`}
           </div>
         </div>
       </div>
@@ -54,7 +54,8 @@ export default function GameDetailPage() {
         </div>
       </div>
 
-      {(g.aggregate_stats?.length ?? 0) > 0 && <div className="panel">
+      {/* Summen aus Access nur zeigen, solange es keine einzelnen Würfe gibt – sonst widersprüchliche Zahlen */}
+      {(g.aggregate_stats?.length ?? 0) > 0 && g.shots.length === 0 && <div className="panel">
         <h2>Zusammengefasste Statistiken</h2>
         <div className="small muted">Diese Quelle liefert Summen statt einzelner Wurfereignisse. Abgeleitete Außenwürfe bleiben gekennzeichnet. Kategorien nach Wurfposition und Angriffsart können sich überschneiden und werden nicht pauschal addiert.</div>
         <table><thead><tr><th>Team</th><th>Tore</th><th>Würfe</th><th>Datenqualität</th></tr></thead><tbody>{g.aggregate_stats?.map(st => <tr key={String(st.is_home)}><td>{st.is_home ? g.home.name : g.away.name}</td><td>{st.goals ?? "–"}</td><td>{st.shots ?? "–"}</td><td>{st.flags.includes("wing_shots_estimated_residual") ? "Außenwürfe teilweise als Rest berechnet. " : ""}{st.flags.includes("shot_total_derived_from_spatial_counts") ? "Wurfzahl aus Positionssummen abgeleitet. " : ""}{st.flags.includes("player_goals_disagree_with_result") ? "Spieler-Torsumme abweichend; xG nicht berechnet. " : ""}{st.flags.includes("wing_residual_conflict") ? "Widersprüchlicher Außenwurf-Rest bleibt leer." : ""}</td></tr>)}</tbody></table>

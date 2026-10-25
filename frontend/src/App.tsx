@@ -39,6 +39,7 @@ export default function App() {
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [competitionId, setId] = useState<number | undefined>(readStoredId);
   const [error, setError] = useState<string | null>(null);
+  const [version, setVersion] = useState<string | null>(null);
 
   const reload = () =>
     api
@@ -54,6 +55,10 @@ export default function App() {
 
   useEffect(() => {
     reload();
+    fetch("/api/version")
+      .then((r) => r.json())
+      .then((v) => setVersion(v.version))
+      .catch(() => {});
   }, []);
 
   const setCompetitionId = (id: number) => {
@@ -81,7 +86,7 @@ export default function App() {
       <div className="layout">
         <aside className="sidebar">
           <div className="brand">
-            Handball xG <small>Statistik · xG · Strategien</small>
+            Handball xG <small>Statistik · xG · Strategien{version ? ` · v${version}` : ""}</small>
           </div>
           <nav className="nav">
             {links.map(([to, label]) => (
