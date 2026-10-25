@@ -46,3 +46,11 @@ def test_saves_have_shooter_and_keeper():
 
 def test_attacks():
     assert parse_attacks(_load("stats_34654.json")) == {1: 55, 2: 53}
+
+
+def test_shooter_team_takes_precedence_over_conflicting_keeper_team():
+    shots = parse_shots(_load("plays_31624_conflict.json"))
+    assert len(shots) == 1
+    assert shots[0].shooter_id == 13663
+    assert shots[0].team_num == 2
+    assert shots[0].outcome == "goal"

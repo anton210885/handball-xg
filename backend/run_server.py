@@ -7,7 +7,7 @@ import socket
 import sys
 from pathlib import Path
 
-HOST, PORT = "127.0.0.1", 8010
+HOST, PORT = "127.0.0.1", 8011
 BACKEND = Path(__file__).resolve().parent
 
 

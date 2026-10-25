@@ -15,7 +15,7 @@ const FIELDS: [keyof Line, string][] = [
 ];
 
 function LineInput({ game, field, onSaved }: { game: Game; field: keyof Line; onSaved: () => void }) {
-  const initial = game.line?.[field] ?? "";
+  const initial = game.line?.[field] ?? (field === "odds_over" || field === "odds_under" ? 1.8 : "");
   const [value, setValue] = useState(String(initial));
   const [state, setState] = useState<"" | "saving" | "ok" | "err">("");
   const save = async () => {

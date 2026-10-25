@@ -8,6 +8,7 @@ import TeamsPage from "./pages/TeamsPage";
 import XgPage from "./pages/XgPage";
 import LinesPage from "./pages/LinesPage";
 import StrategiesPage from "./pages/StrategiesPage";
+import AnalysisPage from "./pages/AnalysisPage";
 import PredictionsPage from "./pages/PredictionsPage";
 
 type CompCtx = {
@@ -69,6 +70,7 @@ export default function App() {
     ["/spiele", "Spiele"],
     ["/linien", "Linien & Quoten"],
     ["/strategien", "Strategien"],
+    ["/analyse", "Metriken & Profit"],
     ["/teams", "Teams"],
     ["/xg", "xG-Modell"],
     ["/import", "Daten-Import"],
@@ -113,6 +115,7 @@ export default function App() {
             <Route path="/spiele/:id" element={<GameDetailPage />} />
             <Route path="/linien" element={<LinesPage />} />
             <Route path="/strategien" element={<StrategiesPage />} />
+            <Route path="/analyse" element={<AnalysisPage />} />
             <Route path="/teams" element={<TeamsPage />} />
             <Route path="/xg" element={<XgPage />} />
             <Route path="/import" element={<ImportPage />} />

@@ -25,7 +25,11 @@ KNOWN_COMPETITIONS = [
      "previous_competition_id": 6597},
     {"id": 8070, "name": "Суперлига Männer – Vorrunde", "season": "26/27", "gender": "men",
      "previous_competition_id": 7284},
-    {"id": 8078, "name": "Суперлига Frauen – Vorrunde", "season": "26/27", "gender": "women"},
+    {"id": 6604, "name": "Суперлига Frauen – komplett (Vorrunde + Playoffs)", "season": "24/25", "gender": "women"},
+    {"id": 7286, "name": "Суперлига Frauen – komplett (Vorrunde + Playoffs)", "season": "25/26", "gender": "women",
+     "previous_competition_id": 6604},
+    {"id": 8078, "name": "Суперлига Frauen – Vorrunde", "season": "26/27", "gender": "women",
+     "previous_competition_id": 7286},
 ]
 
 # Gewicht der Vorsaison in „Spielen“: Ein Team-Merkmal ist

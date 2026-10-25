@@ -24,9 +24,7 @@ export default function GameDetailPage() {
           </h1>
           <div className="muted small">
             {dateTime(g.start)} MSK ·{" "}
-            <a href={g.url} target="_blank">
-              rushandball.ru
-            </a>
+            {g.url ? <a href={g.url} target="_blank">rushandball.ru</a> : <span>{g.source === "handballapi" ? "HandballAPI" : "Access-Bestandsimport"}</span>}
           </div>
         </div>
         <div style={{ textAlign: "right" }}>
@@ -56,6 +54,12 @@ export default function GameDetailPage() {
         </div>
       </div>
 
+      {(g.aggregate_stats?.length ?? 0) > 0 && <div className="panel">
+        <h2>Zusammengefasste Statistiken</h2>
+        <div className="small muted">Diese Quelle liefert Summen statt einzelner Wurfereignisse. Abgeleitete Außenwürfe bleiben gekennzeichnet. Kategorien nach Wurfposition und Angriffsart können sich überschneiden und werden nicht pauschal addiert.</div>
+        <table><thead><tr><th>Team</th><th>Tore</th><th>Würfe</th><th>Datenqualität</th></tr></thead><tbody>{g.aggregate_stats?.map(st => <tr key={String(st.is_home)}><td>{st.is_home ? g.home.name : g.away.name}</td><td>{st.goals ?? "–"}</td><td>{st.shots ?? "–"}</td><td>{st.flags.includes("wing_shots_estimated_residual") ? "Außenwürfe teilweise als Rest berechnet. " : ""}{st.flags.includes("shot_total_derived_from_spatial_counts") ? "Wurfzahl aus Positionssummen abgeleitet. " : ""}{st.flags.includes("player_goals_disagree_with_result") ? "Spieler-Torsumme abweichend; xG nicht berechnet. " : ""}{st.flags.includes("wing_residual_conflict") ? "Widersprüchlicher Außenwurf-Rest bleibt leer." : ""}</td></tr>)}</tbody></table>
+        {g.aggregate_stats?.some(st => Array.isArray(st.categories.players)) && <details style={{ marginTop: 12 }}><summary>Spielerwerte und berechnete Außenwürfe</summary><div className="table-wrap"><table><thead><tr><th>Team</th><th>Spieler</th><th>Position</th><th>Tore</th><th>Würfe</th><th>Außenwürfe</th><th>Herkunft</th></tr></thead><tbody>{g.aggregate_stats?.flatMap(st => (st.categories.players ?? []).map((p: any, i: number) => <tr key={`${st.is_home}-${i}`}><td>{st.is_home ? g.home.name : g.away.name}</td><td>{p.player?.name ?? "–"}</td><td>{p.position ?? "–"}</td><td>{p.statistics?.goals ?? "–"}</td><td>{p.statistics?.shotsTaken ?? "–"}</td><td>{p.statistics?.wingShots_normalized ?? "–"}</td><td>{p.flags?.includes("wing_shots_estimated_residual") ? "Als Rest geschätzt" : p.statistics?.wingShots_normalized != null ? (st.source.startsWith("access") ? "Altbestand; Berechnung nicht verifiziert" : "Quelle") : "Nicht ableitbar"}</td></tr>))}</tbody></table></div></details>}
+      </div>}
       {g.shots.length > 0 ? (
         <>
           <div className="grid2">
@@ -111,7 +115,7 @@ export default function GameDetailPage() {
           </div>
         </>
       ) : (
-        <div className="note">Für dieses Spiel gibt es noch keine Würfe (noch nicht gespielt oder nicht importiert).</div>
+        <div className="note">{g.data_level === "aggregate" ? "Für dieses Spiel liegen zusammengefasste Statistiken vor, keine einzelnen Wurfereignisse." : g.data_level === "results" && g.finished ? "Ergebnisdaten vorhanden. Wurfstatistiken fehlen; xG-Metriken bleiben leer, Tor-Durchschnitte sind nutzbar." : "Für dieses Spiel gibt es noch keine Würfe (noch nicht gespielt oder nicht importiert)."}</div>
       )}
     </>
   );

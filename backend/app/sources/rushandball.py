@@ -179,11 +179,12 @@ def parse_shots(plays_data: dict) -> list[ParsedShot]:
         else:
             keeper = None
 
-        # Das werfende Team ist das Gegenüber des Torwarts; nur ohne Torwart zählt der Werfer
-        if keeper and keeper.get("TeamNum") in (1, 2):
+        # Die Werfer-Zuordnung hat Vorrang: Torwart-Ereignisse können versehentlich
+        # einen Torwart des werfenden Teams enthalten (z. B. Spiel 31624).
+        if shooter and shooter.get("TeamNum") in (1, 2):
+            team_num = shooter["TeamNum"]
+        elif keeper and keeper.get("TeamNum") in (1, 2):
             team_num = 3 - keeper["TeamNum"]
-        elif shooter:
-            team_num = shooter.get("TeamNum")
         elif outcome == "block":
             team_num = 3 - (starts.get(root["StartNum"]) or {}).get("TeamNum", 0)
         else:

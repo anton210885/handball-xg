@@ -17,6 +17,9 @@ export type Game = {
   start: string;
   finished: boolean;
   shots_imported: boolean;
+  stats_imported?: boolean;
+  data_level?: string;
+  source?: string;
   home: { id: number; name: string };
   away: { id: number; name: string };
   home_score: number | null;
@@ -48,7 +51,8 @@ export type Shot = {
 };
 
 export type ZoneStat = { shots: number; goals: number; xg: number };
-export type GameDetail = Game & { shots: Shot[]; zones: { home: Record<string, ZoneStat>; away: Record<string, ZoneStat> } };
+export type AggregateStats = { is_home: boolean; shots: number | null; goals: number | null; source: string; flags: string[]; categories: Record<string, any> };
+export type GameDetail = Game & { aggregate_stats?: AggregateStats[]; shots: Shot[]; zones: { home: Record<string, ZoneStat>; away: Record<string, ZoneStat> } };
 
 export type Competition = {
   id: number;
@@ -62,12 +66,41 @@ export type Competition = {
   games: number;
   finished: number;
   with_shots: number;
+  with_stats?: number;
+  source?: string;
+  country?: string | null;
+  league?: string | null;
 };
 
-export type Rule = { feature: string; op: string; value: number };
-export type Strategy = { id?: number; name: string; market: string; rules: Rule[]; min_games: number; notes?: string | null };
-export type Meta = { features: Record<string, string>; markets: Record<string, string>; ops: string[] };
+// Entweder Merkmal + Vergleich + Wert, oder eine Formel wie "(home_expGoal + away_expGoal) + 2 > over"
+export type Rule = { feature?: string; op?: string; value?: number; formula?: string };
+export type Strategy = { id?: number; name: string; market: string; rules: Rule[]; min_games: number; notes?: string | null; min_odds?: number | null; max_odds?: number | null; stake?: number };
+export type MetricDetails = { label: string; description: string; formula: string; source: string; timing: string };
+export type Meta = { feature_details?: Record<string, MetricDetails>; features: Record<string, string>; markets: Record<string, string>; ops: string[]; legacy_names: string[] };
+export type StrategySummary = {
+  id: number;
+  name: string;
+  market: string;
+  bets?: number;
+  wins?: number;
+  pushes?: number;
+  hit_rate?: number | null;
+  profit?: number;
+  stake?: number;
+  total_staked?: number;
+  avg_odds?: number | null;
+  roi?: number | null;
+  open?: number;
+  error?: string;
+};
+export type AnalysisStats = { bets: number; profit: number; roi: number | null; avg_odds: number | null };
+export type MetricBin = { lower: number | null; upper: number | null; train: AnalysisStats; test: AnalysisStats };
+export type MetricAnalysis = { key: string; label: string; correlation: number | null; coverage: number; missing: number; bins: MetricBin[] };
+export type Analysis = { available_lines?: { min: number | null; max: number | null; games: number }; market: string; stake: number; overall: AnalysisStats; train: AnalysisStats; test: AnalysisStats; cutoff: string | null; metrics: MetricAnalysis[] };
 export type Backtest = {
+  stake: number;
+  total_staked: number;
+  avg_odds: number | null;
   bets: number;
   wins: number;
   pushes: number;
@@ -85,6 +118,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!res.ok) {
+    if (res.status === 405 && path.startsWith("/analysis")) {
+      throw new Error("Der laufende Server hat einen älteren Programmstand. Bitte Handball xG mit stop.vbs beenden und mit start.vbs neu starten, danach die Seite neu laden.");
+    }
     let msg = `${res.status} ${res.statusText}`;
     try {
       const body = await res.json();
@@ -128,6 +164,7 @@ export const api = {
       body: JSON.stringify({ competition_id, game_ids }),
     }),
 
+  analyze: (s: Strategy, ids: number[]) => request<Analysis>(`/analysis${q({ competition_ids: ids.join(",") })}`, { method: "POST", body: JSON.stringify(s) }),
   meta: () => request<Meta>("/meta"),
   strategies: () => request<Strategy[]>("/strategies"),
   saveStrategy: (s: Strategy) =>
@@ -135,8 +172,13 @@ export const api = {
       ? request(`/strategies/${s.id}`, { method: "PUT", body: JSON.stringify(s) })
       : request<{ id: number }>("/strategies", { method: "POST", body: JSON.stringify(s) }),
   deleteStrategy: (id: number) => request(`/strategies/${id}`, { method: "DELETE" }),
-  backtest: (s: Strategy, competition_id?: number) =>
-    request<Backtest>(`/strategies/backtest${q({ competition_id })}`, { method: "POST", body: JSON.stringify(s) }),
+  backtest: (s: Strategy, competition_ids: number[]) =>
+    request<Backtest>(`/strategies/backtest${q({ competition_ids: competition_ids.join(",") })}`, {
+      method: "POST",
+      body: JSON.stringify(s),
+    }),
+  strategySummary: (competition_ids: number[]) =>
+    request<StrategySummary[]>(`/strategies/summary${q({ competition_ids: competition_ids.join(",") })}`),
   predictions: (competition_id?: number) => request<(Game & { strategies: { id: number; name: string; market: string }[] })[]>(
     `/predictions${q({ competition_id })}`,
   ),

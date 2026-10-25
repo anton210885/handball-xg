@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from .config import DEFAULT_ODDS
 from .db import Base
 
 
@@ -13,6 +14,10 @@ class Competition(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)  # rushandball CompId
     name: Mapped[str] = mapped_column(String)
     season: Mapped[str] = mapped_column(String)
+    country: Mapped[str | None] = mapped_column(String, nullable=True)
+    league: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String, nullable=True)
     gender: Mapped[str] = mapped_column(String, default="men")
     # Turnier-ID bei der HandballAPI (RapidAPI), für den Quotenabgleich
     handballapi_tournament_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -28,6 +33,8 @@ class Team(Base):
     name: Mapped[str] = mapped_column(String)
     name_en: Mapped[str | None] = mapped_column(String, nullable=True)
     # Datum des Spiels, aus dem der Name stammt – ältere Saisons überschreiben neuere Namen nicht
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String, nullable=True)
     name_as_of: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Wie das Team bei der HandballAPI heißt (für den Quotenabgleich)
     handballapi_name: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -37,6 +44,10 @@ class Game(Base):
     __tablename__ = "games"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)  # rushandball GameId
     competition_id: Mapped[int] = mapped_column(ForeignKey("competitions.id"))
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    stats_imported: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    date_quality: Mapped[str | None] = mapped_column(String, nullable=True)
     game_number: Mapped[str | None] = mapped_column(String, nullable=True)
     start_moscow: Mapped[datetime] = mapped_column(DateTime)
     home_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"))
@@ -92,8 +103,8 @@ class GameLine(Base):
     odds_home: Mapped[float | None] = mapped_column(Float, nullable=True)
     odds_draw: Mapped[float | None] = mapped_column(Float, nullable=True)
     odds_away: Mapped[float | None] = mapped_column(Float, nullable=True)
-    odds_over: Mapped[float | None] = mapped_column(Float, nullable=True)
-    odds_under: Mapped[float | None] = mapped_column(Float, nullable=True)
+    odds_over: Mapped[float | None] = mapped_column(Float, nullable=True, default=DEFAULT_ODDS)
+    odds_under: Mapped[float | None] = mapped_column(Float, nullable=True, default=DEFAULT_ODDS)
     source: Mapped[str] = mapped_column(String, default="manual")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -109,3 +120,27 @@ class Strategy(Base):
     rules: Mapped[list] = mapped_column(JSON, default=list)
     min_games: Mapped[int] = mapped_column(Integer, default=3)
     notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    min_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stake: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.0)
+
+
+class AggregateStat(Base):
+    """Zusammengefasste Statistiken; keine erfundenen einzelnen Wurfereignisse."""
+    __tablename__ = "aggregate_stats"
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id", ondelete="CASCADE"), primary_key=True)
+    is_home: Mapped[bool] = mapped_column(Boolean, primary_key=True)
+    shots: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    goals: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    categories: Mapped[dict] = mapped_column(JSON, default=dict)
+    source: Mapped[str] = mapped_column(String)
+    flags: Mapped[list] = mapped_column(JSON, default=list)
+
+
+class SourceRecord(Base):
+    """Unveränderte Quelldaten, auch wenn Datum/Zuordnung noch ungeklärt sind."""
+    __tablename__ = "source_records"
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    game_id: Mapped[int | None] = mapped_column(ForeignKey("games.id"), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String)

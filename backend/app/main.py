@@ -1,6 +1,6 @@
 """REST-API für die Oberfläche; liefert nach ``npm run build`` auch die Oberfläche selbst aus.
 
-Start: ``start.vbs`` (ohne Fenster) oder ``uvicorn app.main:app --port 8010`` im Ordner backend."""
+Start: ``start.vbs`` (ohne Fenster) oder ``uvicorn app.main:app --port 8011`` im Ordner backend."""
 from __future__ import annotations
 
 import mimetypes
@@ -12,14 +12,15 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import features as feat
 from . import importer, strategies, xg
 from .db import SessionLocal, get_session, init_db
-from .models import Competition, Game, GameLine, Shot, Strategy, Team
+from .legacy import LEGACY_NAMES
+from .models import Competition, Game, GameLine, Shot, Strategy, Team, AggregateStat, SourceRecord
 from .sources import handballapi
 
 app = FastAPI(title="Handball xG")
@@ -34,6 +35,16 @@ def startup():
 
 # ---------- Hilfsfunktionen ----------
 
+def _selected_rows(session, ids):
+    selected = {int(cid) for cid in ids if str(cid).strip()}
+    return [r for r in feat.all_game_features(session) if r["game"].competition_id in selected]
+
+
+def _available_mean(values):
+    values = [v for v in values if v is not None]
+    return sum(values) / len(values) if values else None
+
+
 def _num(v, digits=2):
     return round(v, digits) if isinstance(v, float) else v
 
@@ -41,11 +52,13 @@ def _num(v, digits=2):
 def game_dict(g: Game, xg_sums: dict | None = None, features: dict | None = None) -> dict:
     d = {
         "id": g.id, "competition_id": g.competition_id, "game_number": g.game_number,
+        "source": g.source or "rushandball", "stats_imported": bool(g.stats_imported),
+        "data_level": "events" if g.shots_imported else "aggregate" if g.stats_imported else "results",
         "start": g.start_moscow.isoformat(), "finished": g.finished, "shots_imported": g.shots_imported,
         "home": {"id": g.home_team_id, "name": g.home_team.name},
         "away": {"id": g.away_team_id, "name": g.away_team.name},
         "home_score": g.home_score, "away_score": g.away_score, "home_ht": g.home_ht, "away_ht": g.away_ht,
-        "url": f"https://rushandball.ru/games/{g.id}",
+        "url": f"https://rushandball.ru/games/{g.id}" if not g.source or g.source == "rushandball" else "",
         "line": None,
     }
     if g.line:
@@ -64,6 +77,17 @@ def _xg_sums(session: Session) -> dict:
     sums: dict = defaultdict(float)
     for gid, home, x in rows:
         sums[(gid, home)] += x or 0.0
+    aggregated = session.execute(select(AggregateStat.game_id, AggregateStat.is_home, Game.home_team_id, Game.away_team_id).join(Game)).all()
+    if aggregated:
+        lookup = {(gid, hid if home else aid): home for gid, home, hid, aid in aggregated}
+        from .pregame import historical_team_stats
+        historical, _ = historical_team_stats(session)
+        for teams in historical.values():
+            for tid, games in teams.items():
+                for game in games:
+                    side = lookup.get((game.game_id, tid))
+                    if side is not None and game.xg is not None:
+                        sums[game.game_id, side] = game.xg
     return sums
 
 
@@ -90,12 +114,14 @@ def list_competitions(session: Session = Depends(get_session)):
         games = session.scalars(select(Game).where(Game.competition_id == c.id)).unique().all()
         out.append({
             "id": c.id, "name": c.name, "season": c.season, "gender": c.gender,
+            "country": c.country, "league": c.league, "source": c.source or "rushandball",
             "handballapi_tournament_id": c.handballapi_tournament_id,
             "handballapi_season_id": c.handballapi_season_id,
             "previous_competition_id": c.previous_competition_id,
             "last_import": c.last_import.isoformat() if c.last_import else None,
             "games": len(games), "finished": sum(g.finished for g in games),
             "with_shots": sum(g.shots_imported for g in games),
+            "with_stats": sum(g.finished and g.home_score is not None and g.away_score is not None for g in games),
         })
     return out
 
@@ -120,6 +146,10 @@ def patch_competition(comp_id: int, body: CompetitionPatch, session: Session = D
 
 @app.post("/api/competitions/{comp_id}/import")
 def start_import(comp_id: int, reimport: bool = False):
+    with SessionLocal() as session:
+        comp = session.get(Competition, comp_id) or _404()
+        if comp.source in ("access", "handballapi"):
+            raise HTTPException(400, "Diese Bestandsdaten werden über scripts/import_unified_history.py aktualisiert; sie sind kein rushandball-Wettbewerb.")
     if importer.STATUS["running"]:
         raise HTTPException(409, "Ein Import läuft bereits")
 
@@ -184,6 +214,9 @@ def get_game(game_id: int, session: Session = Depends(get_session)):
             for z in {s.court_zone for s in shots if s.is_home == side}
         }
     d["zones"] = zones
+    d["aggregate_stats"] = [{"is_home": st.is_home, "shots": st.shots, "goals": st.goals,
+                              "source": st.source, "flags": st.flags, "categories": st.categories}
+                             for st in session.scalars(select(AggregateStat).where(AggregateStat.game_id == game_id))]
     return d
 
 
@@ -222,12 +255,12 @@ def team_table(competition_id: int | None = None, session: Session = Depends(get
         out.append({
             "id": tid, "name": team.name, "games": n,
             "goals": _num(sum(g.goals for g in games) / n), "goals_against": _num(sum(g.goals_against for g in games) / n),
-            "xg": _num(sum(g.xg for g in games) / n), "xga": _num(sum(g.xga for g in games) / n),
-            "finishing": _num(sum(g.goals - g.xg for g in games) / n),
-            "keeper": _num(sum(g.xga - g.goals_against for g in games) / n),
+            "xg": _num(_available_mean([g.xg for g in games])), "xga": _num(_available_mean([g.xga for g in games])),
+            "finishing": _num(_available_mean([g.goals - g.xg for g in games if g.xg is not None])),
+            "keeper": _num(_available_mean([g.xga - g.goals_against for g in games if g.xga is not None])),
             "total": _num(sum(g.goals + g.goals_against for g in games) / n),
         })
-    return sorted(out, key=lambda r: -(r["xg"] - r["xga"]))
+    return sorted(out, key=lambda r: -((r["xg"] or 0) - (r["xga"] or 0)))
 
 
 @app.get("/api/xg/model")
@@ -334,7 +367,20 @@ def fetch_odds(body: OddsFetchIn, session: Session = Depends(get_session)):
 
 @app.get("/api/meta")
 def meta():
-    return {"features": feat.FEATURES, "markets": strategies.MARKETS, "ops": list(strategies.OPS)}
+    from .metric_docs import metric_docs
+    return {"features": feat.FEATURES, "markets": strategies.MARKETS, "ops": list(strategies.OPS),
+            "legacy_names": LEGACY_NAMES, "feature_details": metric_docs()}
+
+
+# Namen, die in Regeln und Formeln vorkommen dürfen
+KNOWN_NAMES = set(feat.FEATURES) | set(LEGACY_NAMES) | {"hdp_line", "odds_draw", "odds_under"}
+
+
+def _check_rules(rules: list[dict]):
+    try:
+        strategies.validate_rules(rules, KNOWN_NAMES)
+    except strategies.FormulaError as ex:
+        raise HTTPException(400, str(ex))
 
 
 class StrategyIn(BaseModel):
@@ -343,6 +389,19 @@ class StrategyIn(BaseModel):
     rules: list[dict]
     min_games: int = 3
     notes: str | None = None
+    min_odds: float | None = Field(default=None, gt=1)
+    max_odds: float | None = Field(default=None, gt=1)
+    stake: float = Field(default=1.0, gt=0)
+
+    @model_validator(mode="after")
+    def check_settings(self):
+        if self.market not in {*strategies.MARKETS, "hdp_home", "hdp_away"}:
+            raise ValueError("Unbekannter Wettmarkt")
+        if self.min_games < 0:
+            raise ValueError("Mindestanzahl Spiele muss mindestens 0 sein")
+        if self.min_odds is not None and self.max_odds is not None and self.min_odds > self.max_odds:
+            raise ValueError("Quote von darf nicht größer als Quote bis sein")
+        return self
 
 
 def _bt_payload(result: dict, sums) -> dict:
@@ -355,19 +414,46 @@ def _bt_payload(result: dict, sums) -> dict:
 
 
 @app.post("/api/strategies/backtest")
-def backtest(body: StrategyIn, competition_id: int | None = None, session: Session = Depends(get_session)):
-    rows = feat.all_game_features(session, competition_id)
+def backtest(body: StrategyIn, competition_id: int | None = None, competition_ids: str | None = None,
+             session: Session = Depends(get_session)):
+    _check_rules(body.rules)
+    if competition_ids:
+        rows = _selected_rows(session, competition_ids.split(","))
+    else:
+        rows = feat.all_game_features(session, competition_id)
     return _bt_payload(strategies.backtest(Strategy(**body.model_dump()), rows), _xg_sums(session))
+
+
+@app.get("/api/strategies/summary")
+def strategies_summary(competition_ids: str, session: Session = Depends(get_session)):
+    """Backtest aller gespeicherten Strategien über mehrere Wettbewerbe (z. B. „6597,7284“)."""
+    rows = _selected_rows(session, competition_ids.split(","))
+    out = []
+    for s in session.scalars(select(Strategy)).all():
+        try:
+            r = strategies.backtest(s, rows)
+        except strategies.FormulaError as ex:
+            out.append({"id": s.id, "name": s.name, "market": s.market, "error": str(ex)})
+            continue
+        out.append({
+            "id": s.id, "name": s.name, "market": s.market, "bets": r["bets"], "wins": r["wins"],
+            "pushes": r["pushes"], "hit_rate": _num(r["hit_rate"], 3), "profit": _num(r["profit"]),
+            "roi": _num(r["roi"], 3), "open": len(r["open"]),
+            "stake": r["stake"], "total_staked": r["total_staked"], "avg_odds": _num(r["avg_odds"]),
+        })
+    return out
 
 
 @app.get("/api/strategies")
 def list_strategies(session: Session = Depends(get_session)):
-    return [{"id": s.id, "name": s.name, "market": s.market, "rules": s.rules, "min_games": s.min_games, "notes": s.notes}
+    return [{"id": s.id, "name": s.name, "market": s.market, "rules": s.rules, "min_games": s.min_games, "notes": s.notes,
+             "min_odds": s.min_odds, "max_odds": s.max_odds, "stake": s.stake or 1.0}
             for s in session.scalars(select(Strategy)).all()]
 
 
 @app.post("/api/strategies")
 def create_strategy(body: StrategyIn, session: Session = Depends(get_session)):
+    _check_rules(body.rules)
     s = Strategy(**body.model_dump())
     session.add(s)
     session.commit()
@@ -376,6 +462,7 @@ def create_strategy(body: StrategyIn, session: Session = Depends(get_session)):
 
 @app.put("/api/strategies/{sid}")
 def update_strategy(sid: int, body: StrategyIn, session: Session = Depends(get_session)):
+    _check_rules(body.rules)
     s = session.get(Strategy, sid) or _404()
     for k, v in body.model_dump().items():
         setattr(s, k, v)
@@ -401,13 +488,35 @@ def predictions(competition_id: int | None = None, session: Session = Depends(ge
         if r["game"].finished:
             continue
         hits = [{"id": s.id, "name": s.name, "market": s.market}
-                for s in strats if strategies.matches(r["features"], s.rules, s.min_games)]
+                for s in strats if strategies.strategy_matches(s, r["features"])]
         out.append({**game_dict(r["game"], sums, r["features"]), "strategies": hits})
     return out
 
 
+class AnalysisIn(StrategyIn):
+    fixed_odds: float | None = Field(default=None, gt=1, allow_inf_nan=False)
+
+
+@app.post("/api/analysis")
+def metric_analysis(body: AnalysisIn, competition_ids: str, session: Session = Depends(get_session)):
+    from .analysis import analyze
+    _check_rules(body.rules)
+    try:
+        ids = list(dict.fromkeys(int(cid) for cid in competition_ids.split(",") if cid.strip()))
+    except ValueError:
+        raise HTTPException(400, "Ungültige Wettbewerb-ID")
+    if not ids:
+        raise HTTPException(400, "Bitte mindestens eine Saison wählen")
+    rows = _selected_rows(session, ids)
+    result = analyze(Strategy(**body.model_dump(exclude={"fixed_odds"})), rows, feat.FEATURES, fixed_odds=body.fixed_odds)
+    lines = [r["features"]["over_line"] for r in rows
+             if r["game"].finished and r["features"].get("over_line") is not None]
+    result["available_lines"] = {"min": min(lines) if lines else None, "max": max(lines) if lines else None, "games": len(lines)}
+    return result
+
+
 # ---------- Gebaute Oberfläche (frontend/dist) ausliefern ----------
-# Nach „npm run build“ läuft alles über einen einzigen Prozess auf Port 8010.
+# Nach „npm run build“ läuft alles über einen einzigen Prozess auf Port 8011.
 
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 # Windows liefert .js je nach Registry als text/plain – Browser starten Module dann nicht

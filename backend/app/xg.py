@@ -19,7 +19,7 @@ xG eines Teams in einem Spiel = Summe der xG seiner Würfe.
 """
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 
 from sqlalchemy import select, update
@@ -75,20 +75,25 @@ class XgModel:
 
 def fit(shots: list[tuple[str | None, str | None, bool]], shrinkage: float = 30.0) -> XgModel:
     """shots: Liste von (Feldzone, Angriffsart, Tor ja/nein)."""
+    return fit_counts(Counter(shots), shrinkage)
+
+
+def fit_counts(counts: dict[tuple[str | None, str | None, bool], int], shrinkage: float = 30.0) -> XgModel:
+    """Wie fit, mit aggregierten Wurfzahlen für zeitlich fortlaufendes Lernen."""
     league = Cell()
     zones: dict[str, Cell] = defaultdict(Cell)
     cells: dict[tuple[str, str], Cell] = defaultdict(Cell)
-    for zone, attack, is_goal in shots:
-        league.shots += 1
-        league.goals += is_goal
+    for (zone, attack, is_goal), count in counts.items():
+        league.shots += count
+        league.goals += count if is_goal else 0
         if zone is None:
             continue
-        zones[zone].shots += 1
-        zones[zone].goals += is_goal
+        zones[zone].shots += count
+        zones[zone].goals += count if is_goal else 0
         if zone != "7m":
             key = (zone, attack_group(attack))
-            cells[key].shots += 1
-            cells[key].goals += is_goal
+            cells[key].shots += count
+            cells[key].goals += count if is_goal else 0
 
     league.rate = league.goals / league.shots if league.shots else 0.5
     for z in zones.values():

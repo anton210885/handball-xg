@@ -25,7 +25,7 @@ ready = False
 For i = 1 To 40
     On Error Resume Next
     Set http = CreateObject("MSXML2.ServerXMLHTTP")
-    http.Open "GET", "http://127.0.0.1:8010/api/meta", False
+    http.Open "GET", "http://127.0.0.1:8011/api/meta", False
     http.Send
     If Err.Number = 0 Then
         If http.Status = 200 Then ready = True
@@ -37,7 +37,7 @@ For i = 1 To 40
 Next
 
 If ready Then
-    shell.Run "http://localhost:8010", 1, False
+    shell.Run "http://localhost:8011", 1, False
 Else
     MsgBox "Der Server ist nicht gestartet. Details: backend\data\server.log", vbExclamation, "Handball xG"
 End If

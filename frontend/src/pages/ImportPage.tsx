@@ -96,7 +96,8 @@ export default function ImportPage() {
               <th>Name</th>
               <th className="num">Spiele</th>
               <th className="num">beendet</th>
-              <th className="num">mit Würfen</th>
+              <th className="num">mit Einzelwürfen</th>
+              <th className="num">für Tor-Metriken</th>
               <th>Letzter Import</th>
               <th title="Deren Spiele fließen gewichtet in die Team-Werte ein, solange ein Team erst wenige Spiele hat">
                 Vorsaison-ID
@@ -114,6 +115,7 @@ export default function ImportPage() {
                 <td className="num">{c.games}</td>
                 <td className="num">{c.finished}</td>
                 <td className="num">{c.with_shots}</td>
+                <td className="num">{c.with_stats ?? c.with_shots}</td>
                 <td>{c.last_import ? new Date(c.last_import + "Z").toLocaleString("de-DE") : "–"}</td>
                 <td>
                   <select
@@ -144,10 +146,10 @@ export default function ImportPage() {
                   />
                 </td>
                 <td className="row">
-                  <button disabled={status?.running} onClick={() => start(c.id)}>
+                  <button disabled={status?.running || (c.source != null && c.source !== "rushandball")} onClick={() => start(c.id)}>
                     Importieren
                   </button>
-                  <button className="secondary" disabled={status?.running} onClick={() => start(c.id, true)}>
+                  <button className="secondary" disabled={status?.running || (c.source != null && c.source !== "rushandball")} onClick={() => start(c.id, true)}>
                     Alles neu
                   </button>
                 </td>

@@ -60,7 +60,7 @@ class HandballApiClient:
         return (self._get(f"unique-tournament/{tournament_id}/seasons") or {}).get("seasons", [])
 
     def season_events(self, tournament_id: int, season_id: int) -> list[dict]:
-        """Alle Spiele einer Saison (über die Heimspiele jedes Teams)."""
+        """Gelieferter Saisonausschnitt über Heimspiele; der Anbieter begrenzt die Liste je Team."""
         data = self._get(f"unique-tournament/{tournament_id}/season/{season_id}/team-events/home") or {}
         events = {}
         for teams in data.get("tournamentTeamEvents", {}).values():

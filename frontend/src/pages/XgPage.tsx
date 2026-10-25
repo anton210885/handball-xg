@@ -53,6 +53,7 @@ export default function XgPage() {
         </p>
       </div>
 
+      <div className="note small">Diese Übersicht beschreibt das Einzelwurf-Modell aus dem aktuellen Einzelwurf-Datenbestand. Aggregierte Wurfzahlen anderer Quellen verwenden ein getrenntes, gröberes Modell. Strategien und Korrelationen berechnen ihre xG-Merkmale separat mit dem damaligen Wissensstand aus früheren Kalendertagen; die Werte können deshalb abweichen.</div>
       <div className="grid2">
         <div className="panel table-wrap">
           <h2>Zonen</h2>
