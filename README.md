@@ -66,7 +66,9 @@ npm run build
 Zum Entwickeln mit Live-Neuladen gibt es `start_entwicklung.bat`. Sie öffnet zwei Fenster (Backend und Vite) und startet die Oberfläche auf http://localhost:5173.
 
 ### Vorsaison
-Jeder Wettbewerb kann auf seine Vorsaison verweisen (Seite „Daten-Import“, Spalte „Vorsaison-ID“). Die Team-Werte werden dann zur Vorsaison hin gezogen: `(Summe aktuelle Spiele + k · Ø Vorsaison) / (Anzahl aktuelle Spiele + k)` mit k = 3 (`PRIOR_WEIGHT_GAMES`). Aufsteiger haben keine Vorsaison, für sie zählt nur die laufende Saison. Die Auswertung dazu: `.venv\Scripts\python scripts\evaluate_prior.py`.
+**Standard: aus.** Team-Werte (Ø xG, Ø xG gegen, Abschluss, Torwart …) kommen nur aus Spielen der laufenden Saison; vor dem ersten Spiel eines Teams gibt es deshalb keine Prognose. Das xG-Modell pro Wurf lernt davon unabhängig weiter aus allen früheren Spielen der Liga, auch aus Vorsaisons.
+
+Einschalten lässt sich die Vorsaison mit `PRIOR_WEIGHT_GAMES=3` in `backend/.env`. Jeder Wettbewerb kann auf seine Vorsaison verweisen (Seite „Daten-Import“, Spalte „Vorsaison-ID“); die Team-Werte werden dann zur Vorsaison hin gezogen: `(Summe aktuelle Spiele + k · Ø Vorsaison) / (Anzahl aktuelle Spiele + k)`. Laut Auswertung hilft das nur an Spieltag 1–2. Die Auswertung dazu: `.venv\Scripts\python scripts\evaluate_prior.py`.
 
 Importiert sind die Männer-Saisons 24/25 (`6597`), 25/26 (`7284`) und 26/27 (`8070`).
 

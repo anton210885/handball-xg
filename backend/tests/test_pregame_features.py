@@ -34,8 +34,8 @@ def game(s, gid, day, comp=1, home=1, away=2, score=(2,1), hour=12, goal=True):
     return g
 
 
-def features(s,gid,comp=1):
-    return next(r['features'] for r in all_game_features(s,comp) if r['game'].id==gid)
+def features(s,gid,comp=1,prior_weight=None):
+    return next(r['features'] for r in all_game_features(s,comp,prior_weight) if r['game'].id==gid)
 
 
 def test_current_result_and_future_games_cannot_change_pregame_features(db):
@@ -79,13 +79,23 @@ def test_prior_history_must_be_before_game_and_same_group(db):
     game(db,1,-10,comp=2,score=(12,10))
     game(db,2,10,comp=2,score=(100,100))
     game(db,3,0)
-    value=features(db,3)
+    value=features(db,3,prior_weight=3)
     assert value['home_prev_games']==1
     assert value['home_avg_goals']==12
     assert value['home_games']==0
     db.get(Competition,2).gender='women';db.flush()
-    assert features(db,3)['home_prev_games']==0
-    assert 'pred_total' not in features(db,3)
+    assert features(db,3,prior_weight=3)['home_prev_games']==0
+    assert 'pred_total' not in features(db,3,prior_weight=3)
+
+
+def test_prior_season_is_off_by_default(db):
+    db.add(Competition(id=2,name='League Männer – Vorrunde',season='23/24',gender='men'));db.flush()
+    db.get(Competition,1).previous_competition_id=2
+    game(db,1,-10,comp=2,score=(12,10))
+    game(db,3,0)
+    value=features(db,3)
+    assert value['home_prev_games']==0
+    assert 'pred_total' not in value
 
 
 def test_all_competitions_preserve_season_scope_and_gender(db):

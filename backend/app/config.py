@@ -50,9 +50,10 @@ KNOWN_COMPETITIONS = [
 
 # Gewicht der Vorsaison in „Spielen“: Ein Team-Merkmal ist
 #   (Summe aktuelle Spiele + k · Ø Vorsaison) / (Anzahl aktuelle Spiele + k)
-# k = 0 schaltet die Vorsaison ab. k = 3 war in scripts/evaluate_prior.py auf 25/26 und
-# 26/27 nahe am Besten (Spieltag 1–2 deutlich genauer, später praktisch kein Unterschied).
-PRIOR_WEIGHT_GAMES = float(os.getenv("PRIOR_WEIGHT_GAMES", "3"))
+# k = 0 (Standard) schaltet die Vorsaison ab: Team-Werte kommen nur aus der laufenden Saison.
+# k = 3 war in scripts/evaluate_prior.py nahe am Besten, hilft aber nur an Spieltag 1–2.
+# Das xG-Modell pro Wurf lernt unabhängig davon weiter aus allen früheren Spielen der Liga.
+PRIOR_WEIGHT_GAMES = float(os.getenv("PRIOR_WEIGHT_GAMES", "0"))
 
 # Standardquote, wenn für eine Wette keine Quote hinterlegt ist (für Backtests)
 DEFAULT_ODDS = 1.80  # wie in der alten Auswertung (Gewinn +0,8 je Treffer)
