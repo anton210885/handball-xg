@@ -18,6 +18,8 @@ Die Webseite holt ihre Daten aus einer JSON-Schnittstelle:
 
 Die Rohdaten werden unter `backend/data/raw/` zwischengespeichert. Ein erneuter Import lädt sie also nicht noch einmal.
 
+**Automatisch:** Der Server lädt alle 6 Stunden (`AUTO_IMPORT_HOURS`, 0 = aus) die laufenden Saisons nach – Russland (jeder rushandball-Wettbewerb mit Spielen von vor drei Wochen bis in zwei Wochen) und die aktuelle koreanische Saison. Neu beendete Spiele bekommen ihre Würfe frühestens 3 Stunden nach Anpfiff, danach werden xG und Team-Werte neu berechnet. Stand und nächster Lauf stehen auf „Daten-Import“.
+
 ### xG-Modell (`backend/app/xg.py`)
 Die Torquote wird pro **Feldzone × Angriffsart** (Positionsangriff / Umschalten) aus allen Würfen geschätzt. Seltene Kombinationen werden zur Zonenquote hin geglättet: `(Tore + k·Zonenquote) / (Würfe + k)`. Ein 7-m-Wurf hat eine eigene Quote.
 

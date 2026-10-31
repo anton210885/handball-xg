@@ -23,7 +23,8 @@ from . import importer, strategies, xg
 from .db import SessionLocal, get_session, init_db
 from . import __version__
 from .legacy import LEGACY_NAMES
-from .config import DATA_DIR, ODDSPAPI_KEY, ODDSPAPI_SYNC_HOURS
+from .config import AUTO_IMPORT_HOURS, DATA_DIR, ODDSPAPI_KEY, ODDSPAPI_SYNC_HOURS
+from . import auto_import
 from . import oddspapi_sync
 from .sources import oddspapi as oddspapi_source
 from .models import Competition, Game, GameLine, Shot, Strategy, Team, AggregateStat, SourceRecord
@@ -39,6 +40,7 @@ def startup():
         importer.seed_known_competitions(s)
     if ODDSPAPI_KEY:
         oddspapi_sync.start_scheduler(SessionLocal, ODDSPAPI_SYNC_HOURS)
+    auto_import.start_scheduler(SessionLocal, AUTO_IMPORT_HOURS)
 
 
 # ---------- Hilfsfunktionen ----------
@@ -207,8 +209,8 @@ def start_import(comp_id: int, reimport: bool = False):
         comp = session.get(Competition, comp_id) or _404()
         if comp.source in ("access", "handballapi"):
             raise HTTPException(400, "Diese Bestandsdaten werden über scripts/import_unified_history.py aktualisiert; sie sind kein rushandball-Wettbewerb.")
-    if importer.STATUS["running"]:
-        raise HTTPException(409, "Ein Import läuft bereits")
+    if importer.STATUS["running"] or auto_import.STATUS["running"]:
+        raise HTTPException(409, "Ein Import läuft bereits (eventuell der automatische) – bitte kurz warten")
 
     def run():
         with SessionLocal() as s:
@@ -220,6 +222,11 @@ def start_import(comp_id: int, reimport: bool = False):
     importer.STATUS.update(running=True, message="Start …")
     threading.Thread(target=run, daemon=True).start()
     return {"started": True}
+
+
+@app.get("/api/import/auto")
+def auto_import_status():
+    return auto_import.STATUS
 
 
 @app.get("/api/import/status")

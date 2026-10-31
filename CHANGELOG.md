@@ -2,6 +2,9 @@
 
 Die Versionsnummer steht in `backend/app/__init__.py` und `frontend/package.json` (ein Test prüft, dass beide gleich sind). Sie wird im Seitenmenü und unter `/api/version` angezeigt.
 
+## 0.8.1 – 2026-10-31
+- **Automatischer Import** der laufenden Saisons (Russland, Korea) alle 6 Stunden (`AUTO_IMPORT_HOURS`): neue Ergebnisse, Würfe (frühestens 3 Stunden nach Anpfiff) und geänderte Anstoßzeiten, danach xG neu. Stand auf „Daten-Import“.
+
 ## 0.8.0 – 2026-10-31
 - **Spielphase** je Spiel: Hauptrunde, KO-Spiel (Viertel-/Halbfinale, Finale, Spiele um Plätze) oder Platzierungsrunde – aus dem rushandball-Spielplan (Russland), koreahandball (Korea) und der Access-Spalte `tour` (40 = Playoff). Filter und Etikett auf „Spiele“, „Linien & Quoten“ und „Prognosen“; Metriken `is_knockout` / `is_league` für Strategien, der alte Name `tour` ist bei KO-Spielen wie in Access 40. Nachtragen: `scripts/backfill_stages.py`.
 - Fehlimport der 2. Bundesliga Männer korrigiert: Turnier-ID 921 statt 150, 230 belegte Fußballspiele und 25 verwaiste Teams nach Sicherung bereinigt. Rohdaten bleiben als abgewiesene Datensätze erhalten; Import prüft Sportart und Turnier-ID.

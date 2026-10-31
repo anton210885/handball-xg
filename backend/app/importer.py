@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
@@ -40,7 +40,8 @@ def _upsert_team(session: Session, t: dict, as_of: datetime):
 
 
 def import_competition(session: Session, comp_id: int, client: RushandballClient | None = None,
-                       reimport: bool = False) -> dict:
+                       reimport: bool = False, settle_hours: float = 0) -> dict:
+    """``settle_hours``: Würfe eines Spiels erst so lange nach Anpfiff (Moskauer Zeit) übernehmen."""
     client = client or RushandballClient()
     comp = session.get(Competition, comp_id)
     if comp is None:
@@ -73,6 +74,9 @@ def import_competition(session: Session, comp_id: int, client: RushandballClient
         if not reimport:
             done_ids = {gid for (gid,) in session.query(Game.id).filter(Game.shots_imported.is_(True))}
             todo = [g for g in todo if g["id"] not in done_ids]
+        if settle_hours:
+            cutoff = datetime.utcnow() + timedelta(hours=3 - settle_hours)
+            todo = [g for g in todo if g["start_moscow"] <= cutoff]
         STATUS.update(total=len(todo), message=f"{len(todo)} Spiele mit Würfen laden …")
 
         for i, g in enumerate(todo, 1):

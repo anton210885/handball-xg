@@ -208,6 +208,8 @@ export const api = {
   patchCompetition: (id: number, body: Partial<Competition>) =>
     request(`/competitions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   startImport: (id: number, reimport = false) => request(`/competitions/${id}/import${q({ reimport: String(reimport) })}`, { method: "POST" }),
+  autoImportStatus: () =>
+    request<{ every_hours: number; running: boolean; last_run: string | null; next_run: string | null; message: string }>("/import/auto"),
   importStatus: () =>
     request<{ running: boolean; done: number; total: number; message: string; errors: string[] }>("/import/status"),
 

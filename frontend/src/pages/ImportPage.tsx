@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useCompetition } from "../App";
+import { useLoad } from "../useLoad";
+
+const when = (iso: string | null) => (iso ? new Date(iso + "Z").toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" }) : "–");
 
 export default function ImportPage() {
   const { competitions, reload } = useCompetition();
   const [status, setStatus] = useState<Awaited<ReturnType<typeof api.importStatus>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({ id: "", name: "", season: "", gender: "men" });
+  const auto = useLoad(() => api.autoImportStatus(), []);
 
   // Fortschritt abfragen, solange ein Import läuft
   useEffect(() => {
@@ -66,6 +70,19 @@ export default function ImportPage() {
         Quelle ist <a href="https://rushandball.ru/superleague_26-27" target="_blank">rushandball.ru</a>. Der Import lädt den
         Spielplan und für jedes beendete Spiel den Spielverlauf mit allen Würfen (Feldzone, Torzone, Angriffsart).
         Bereits geladene Spiele werden übersprungen; die Rohdaten liegen zusätzlich in <code>backend/data/raw</code>.
+        {auto.data && (
+          <div style={{ marginTop: 6 }}>
+            {auto.data.every_hours > 0 ? (
+              <>
+                <b>Automatisch:</b> laufende Saisons (Russland, Korea) alle {auto.data.every_hours} Stunden
+                {auto.data.running ? " · läuft gerade …" : ` · zuletzt ${when(auto.data.last_run)} · nächster Lauf ${when(auto.data.next_run)}`}
+                {auto.data.message && <div className="small muted">{auto.data.message}</div>}
+              </>
+            ) : (
+              <>Automatischer Import ist aus (<code>AUTO_IMPORT_HOURS=0</code> in <code>backend/.env</code>).</>
+            )}
+          </div>
+        )}
       </div>
 
       {status && (status.running || status.message) && (

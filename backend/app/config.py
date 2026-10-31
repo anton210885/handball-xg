@@ -24,6 +24,8 @@ ODDSPAPI_MONTHLY_BUDGET = int(os.getenv("ODDSPAPI_MONTHLY_BUDGET", "240"))
 ODDSPAPI_BOOKMAKERS = os.getenv("ODDSPAPI_BOOKMAKERS", "superbet,vave,marathonbet").split("#")[0].strip()
 # Automatischer Abgleich: alle x Stunden; Vorab-Quoten für Spiele der nächsten x Tage
 ODDSPAPI_SYNC_HOURS = float(os.getenv("ODDSPAPI_SYNC_HOURS", "6"))
+# Laufende Saisons (Russland, Korea) automatisch nachladen: alle x Stunden, 0 = aus
+AUTO_IMPORT_HOURS = float(os.getenv("AUTO_IMPORT_HOURS", "6"))
 ODDSPAPI_PREMATCH_DAYS = float(os.getenv("ODDSPAPI_PREMATCH_DAYS", "2"))
 # Vorab-Quoten eines Spiels frühestens nach x Stunden erneut holen
 ODDSPAPI_PREMATCH_REFRESH_HOURS = float(os.getenv("ODDSPAPI_PREMATCH_REFRESH_HOURS", "12"))
