@@ -163,6 +163,7 @@ def import_korea(session: Session, seasons: list[int] | None = None, client: kh.
             game.start_moscow, game.date_quality = sg.start_moscow, "exact"
             game.home_score, game.away_score = sg.home_score, sg.away_score
             game.finished = sg.home_score is not None
+            game.stage, game.stage_type = ("Playoff", "knockout") if sg.playoff else ("Hauptrunde", "league")
             session.add(game)
             session.flush()
             if sg.match_seq:

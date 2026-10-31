@@ -84,3 +84,30 @@ def test_no_line_in_range_warns():
     r = parse("Over/Under +50.5 1.20 4.10\nOver/Under +65.5 4.30 1.18")
     assert "over_line" not in r
     assert any("1,70 und 2,00" in w for w in r["warnings"])
+
+
+# oddsportal-Übersicht mit jeder Zelle in eigener Zeile: Anzahl Buchmacher direkt nach der Linie
+ODDSPORTAL_AH = """
+Asian Handicap +6.25
+3
+1.99
+1.59
+88.4%
+Asian Handicap +6.5
+4
+1.95
+1.75
+87.0%
+Asian Handicap +7.25
+3
+1.74
+1.79
+88.2%
+"""
+
+
+def test_bookmaker_count_after_line_decides_tie():
+    r = parse(ODDSPORTAL_AH)
+    assert r["hdp_line"] == 6.5  # 4 Buchmacher schlagen die ausgeglichenere Linie mit 3
+    assert [h["count"] for h in r["handicaps"]] == [3, 4, 3]
+    assert r["handicaps"][1]["a"] == 1.95

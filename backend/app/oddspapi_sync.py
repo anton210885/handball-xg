@@ -8,7 +8,7 @@ Ablauf je Wettbewerb (nur solche mit OddsPapi-Turnier, siehe ODDSPAPI_TOURNAMENT
 3. Spiele über Anstoßzeit (±3 h) und Teamnamen zuordnen, Teilnehmer-IDs merken.
 4. Quoten holen, Hauptlinie nach der Regel 1,70–2,00 bestimmen und speichern.
 
-Von Hand eingetragene Linien (Quelle „manual“ mit Torlinie) werden nie überschrieben.
+Von Hand eingetragene Linien, 1X2-Quoten und Handicaps werden nie überschrieben.
 Spiele, für die OddsPapi nichts hat, werden markiert und nicht erneut abgefragt.
 """
 from __future__ import annotations
@@ -24,9 +24,9 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .config import (ODDSPAPI_BOOKMAKERS, ODDSPAPI_PREMATCH_DAYS, ODDSPAPI_PREMATCH_REFRESH_HOURS,
-                     ODDSPAPI_TOURNAMENTS)
-from .models import Competition, Game, GameLine, Team
+from .config import (ODDSPAPI_BOOKMAKERS, ODDSPAPI_HISTORY_SINCE, ODDSPAPI_PREMATCH_DAYS,
+                     ODDSPAPI_PREMATCH_REFRESH_HOURS, ODDSPAPI_TOURNAMENTS)
+from .models import Competition, Game, GameLine, SourceRecord, Team
 from .sources import oddspapi
 
 log = logging.getLogger(__name__)
@@ -42,6 +42,15 @@ def tournament_for(comp: Competition) -> int | None:
     key, gender = league_key(comp)
     country, league = key if isinstance(key, tuple) else (comp.country, key)
     return ODDSPAPI_TOURNAMENTS.get((country, league, gender))
+
+
+def _handball_source(session: Session, game: Game) -> bool:
+    """Keine Quoten für eindeutig falsch etikettierte Fremdsport-Quelldaten suchen."""
+    if game.source != "handballapi" or not game.external_id:
+        return True
+    record = session.get(SourceRecord, f"api:event:{game.external_id}")
+    sport = ((record.payload if record else {}).get("tournament", {}).get("category", {}).get("sport") or {})
+    return (sport.get("slug") in (None, "handball") and sport.get("id") in (None, 6))
 
 
 # ---------- Zuordnung ----------
@@ -102,12 +111,18 @@ def match_fixture(fx: dict, games: list[Game]) -> tuple[Game | None, bool]:
 # ---------- Speichern ----------
 
 def _is_real_manual(line: GameLine | None) -> bool:
-    return bool(line and line.source and "manual" in line.source and line.over_line is not None)
+    if not (line and line.source and "manual" in line.source):
+        return False
+    return any(getattr(line, key, None) is not None for key in
+               ("over_line", "hdp_line", "odds_home", "odds_draw", "odds_away")) or any(
+        getattr(line, key, None) not in (None, 1.8) for key in ("odds_over", "odds_under"))
 
 
 def apply_line(session: Session, game: Game, values: dict, swapped: bool, closing: bool) -> bool:
     """Speichert die Werte (aus Sicht des Heimteams). False, wenn nichts Verwertbares da ist."""
     if not values:
+        return False
+    if _is_real_manual(game.line):
         return False
     if swapped:
         values = dict(values)
@@ -141,24 +156,33 @@ def _windows(days: list[date]) -> list[tuple[date, date]]:
 
 
 def sync_competition(session: Session, comp: Competition, client: oddspapi.OddsPapiClient,
-                     markets: dict, now: datetime | None = None) -> dict:
+                     markets: dict, now: datetime | None = None, historical_only: bool = False) -> dict:
     now = now or datetime.now(timezone.utc)
     tid = tournament_for(comp)
     report = {"competition_id": comp.id, "season": comp.season, "gender": comp.gender,
-              "closing": 0, "prematch": 0, "no_data": 0, "unmatched": 0, "no_main_line": 0}
+              "closing": 0, "prematch": 0, "no_data": 0, "unmatched": 0, "no_main_line": 0,
+              "errors": 0, "failed_game_ids": [], "excluded_wrong_sport": 0}
     if not tid:
         return report
 
     games = session.scalars(select(Game).where(Game.competition_id == comp.id)).unique().all()
+    valid_games = [g for g in games if _handball_source(session, g)]
+    report["excluded_wrong_sport"] = len(games) - len(valid_games)
+    games = valid_games
     # Beendet: noch ohne vollständige Linie – oder bisher nur Vorab-Quoten (dann Schlusskurse nachholen)
-    finished = [g for g in games if g.finished and g.oddspapi_status not in ("close", "none")
+    books = oddspapi.bookmaker_key(ODDSPAPI_BOOKMAKERS)
+    finished = [g for g in games if g.finished
+                and not (g.oddspapi_status in ("close", "none") and g.oddspapi_bookmakers == books)
+                and g.start_moscow >= ODDSPAPI_HISTORY_SINCE
                 and not _is_real_manual(g.line)
-                and (g.oddspapi_status == "pre" or not (g.line and g.line.over_line is not None and g.line.odds_home))]
+                and (g.oddspapi_status is not None or not (g.line and g.line.over_line is not None
+                     and g.line.odds_home and g.line.odds_draw and g.line.odds_away))]
     upcoming = [g for g in games if not g.finished and now <= _utc(g) <= now + timedelta(days=ODDSPAPI_PREMATCH_DAYS)
                 and not _is_real_manual(g.line)
                 and not (g.oddspapi_status == "pre" and g.line and g.line.updated_at
                          and now - g.line.updated_at.replace(tzinfo=timezone.utc) < PREMATCH_REFRESH)]
-    targets = finished + upcoming
+    targets = finished if historical_only else finished + upcoming
+    log.info("%s %s %s: %s Zielspiele", comp.name, comp.gender, comp.season, len(targets))
     if not targets:
         return report
 
@@ -185,9 +209,28 @@ def sync_competition(session: Session, comp: Competition, client: oddspapi.OddsP
             continue
         start = _utc(g)
         if g.finished:
-            data = client.historical_odds(g.oddspapi_fixture_id, ODDSPAPI_BOOKMAKERS)
+            try:
+                data = client.historical_odds(g.oddspapi_fixture_id, ODDSPAPI_BOOKMAKERS)
+            except oddspapi.OddsPapiError as ex:
+                if ex.status_code is not None and ex.status_code >= 500:
+                    report["errors"] += 1
+                    report["failed_game_ids"].append(g.id)
+                    log.warning("Spiel %s nach Wiederholungen offen: %s", g.id, ex)
+                    continue
+                raise
+            # Der lange Abruf darf einen inzwischen in der Oberfläche gesetzten Handeintrag nicht verdrängen.
+            session.refresh(g)
+            if _is_real_manual(g.line):
+                continue
             sw = _is_swapped(g, data, swapped)
             values = oddspapi.extract_line(data, markets, start) if data else {}
+            # Vorherige OddsPapi-Werte werden als zusammengehöriger Stand ersetzt.
+            # So bleiben keine alten/falschen Buchmacher- oder Nachanpfiffwerte stehen.
+            if g.line and (g.line.source or "").startswith("oddspapi"):
+                for key in ("over_line", "odds_over", "odds_under", "hdp_line", "odds_home", "odds_draw", "odds_away"):
+                    setattr(g.line, key, None)
+                g.line.updated_at = datetime.utcnow()
+            g.oddspapi_bookmakers = books
             if not data:
                 g.oddspapi_status = "none"
                 report["no_data"] += 1
@@ -207,6 +250,7 @@ def sync_competition(session: Session, comp: Competition, client: oddspapi.OddsP
                 report["prematch"] += 1
                 report["no_main_line"] += "over_line" not in values
         session.commit()
+        log.info("Spiel %s: %s; Abfragen %s", g.id, g.oddspapi_status, client.calls)
     return report
 
 
@@ -220,8 +264,8 @@ def _is_swapped(game: Game, data: dict | None, known: dict[int, bool]) -> bool:
     return bool(game.oddspapi_swapped)
 
 
-def sync_all(session: Session, competition_ids: list[int] | None = None) -> dict:
-    """Alle passenden Wettbewerbe abgleichen. Ohne Auswahl: nur Saisons mit offenen Spielen."""
+def sync_all(session: Session, competition_ids: list[int] | None = None, historical_only: bool = False) -> dict:
+    """Passende Wettbewerbe: standardmäßig offene Saisons, mit historical_only das ganze Archiv."""
     if not _lock.acquire(blocking=False):
         return {"error": "Abgleich läuft bereits"}
     STATUS.update(running=True, message="läuft …")
@@ -230,17 +274,27 @@ def sync_all(session: Session, competition_ids: list[int] | None = None) -> dict
         comps = session.scalars(select(Competition)).all()
         if competition_ids:
             comps = [c for c in comps if c.id in competition_ids]
+        elif historical_only:
+            history_comp_ids = set(session.scalars(select(Game.competition_id).where(
+                Game.finished.is_(True), Game.start_moscow >= ODDSPAPI_HISTORY_SINCE)).all())
+            comps = [c for c in comps if c.id in history_comp_ids]
         else:
             open_comp_ids = {cid for (cid,) in session.execute(
                 select(Game.competition_id).where(Game.finished.is_(False)).distinct())}
             comps = [c for c in comps if c.id in open_comp_ids]
         comps = [c for c in comps if tournament_for(c)]
+        if historical_only:
+            # Zuerst die aktuellen Hauptwettbewerbe; große ältere Bestände folgen danach.
+            comps.sort(key=lambda c: (c.country == "Russia", c.season), reverse=True)
         reports = []
         try:
             markets = client.markets()
             for c in comps:
-                reports.append(sync_competition(session, c, client, markets))
+                reports.append(sync_competition(session, c, client, markets, historical_only=historical_only))
             message = "fertig"
+            errors = sum(r["errors"] for r in reports)
+            if errors:
+                message += f"; {errors} Spiele wegen Anbieterfehlern noch offen (erneut starten)"
         except (oddspapi.BudgetExceeded, oddspapi.OddsPapiError) as ex:
             message = str(ex)
         result = {"reports": reports, "calls": client.calls, "used_this_month": oddspapi.usage(session),

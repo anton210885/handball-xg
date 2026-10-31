@@ -54,3 +54,13 @@ def test_shooter_team_takes_precedence_over_conflicting_keeper_team():
     assert shots[0].shooter_id == 13663
     assert shots[0].team_num == 2
     assert shots[0].outcome == "goal"
+
+
+def test_stage_from_schedule_entry():
+    from app.sources.rushandball import stage_of
+    entry = lambda name, typ: {"Comp": {"ShortName": name, "CompTypeId": typ}}
+    assert stage_of(entry("Предварительный этап", 0)) == ("Предварительный этап", "league")
+    assert stage_of(entry("1/4 финала (2)", 2)) == ("1/4 финала (2)", "knockout")
+    assert stage_of(entry("матч за 1 место", 5)) == ("матч за 1 место", "knockout")
+    assert stage_of(entry("Фин. эт., 9-12 места", 0)) == ("Фин. эт., 9-12 места", "placement")
+    assert stage_of({}) == (None, None)

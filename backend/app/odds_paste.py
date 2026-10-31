@@ -6,7 +6,8 @@ Tabellenzeile in einer Textzeile steht oder jede Zelle in einer eigenen:
 * **Linie**: Zahl mit Vorzeichen oder einer Nachkommastelle, z. B. „+57.5“, „-3.5“, „58“ nach „O/U“.
   Ab 30 ist es eine Torlinie (Over/Under), bis 25 ein Handicap (aus Sicht des Heimteams).
 * **Quote**: Dezimalquote mit zwei Nachkommastellen, z. B. „1.85“ oder „1,85“.
-* Prozentwerte (Auszahlung) und ganze Zahlen (Anzahl Buchmacher) werden übergangen.
+* Prozentwerte (Auszahlung) werden übergangen. Eine ganze Zahl direkt nach der Linie ist die Anzahl
+  Buchmacher (Übersichtszeile mit Durchschnittsquoten); sie zählt bei der Wahl der Hauptlinie mit.
 
 Die Quoten nach einer Linie gehören paarweise zu ihr (Over/Under bzw. Heim/Gast). Quoten vor
 der ersten Linie werden als 1X2 gelesen (je drei). Paare und Dreier mit unplausibler Marge
@@ -36,24 +37,30 @@ def _plausible(odds: list[float]) -> bool:
 
 def parse(text: str) -> dict:
     tokens = _TOKEN.findall(text or "")
-    segments: list[tuple[float | None, list[float]]] = [(None, [])]
-    prev_word = False
+    # (Linie, Quoten, Anzahl Buchmacher laut Übersichtszeile)
+    segments: list[tuple[float | None, list[float], list[int]]] = [(None, [], [1])]
+    prev_word = after_line = False
     for tok in tokens:
         if tok[0].isalpha():
             prev_word = tok.lower() in _LINE_WORDS
+            after_line = False
             continue
         if tok.endswith("%"):
-            prev_word = False
+            prev_word = after_line = False
             continue
         if _ODDS.match(tok) and not tok.startswith(("+", "-")):
             segments[-1][1].append(_num(tok))
+        elif after_line and tok.isdigit() and 1 <= int(tok) <= 60:
+            segments[-1][2][0] = int(tok)
         elif _LINE.match(tok) and (tok[0] in "+-" or "." in tok or "," in tok or prev_word):
-            segments.append((_num(tok), []))
-        prev_word = False
+            segments.append((_num(tok), [], [1]))
+            prev_word, after_line = False, True
+            continue
+        prev_word = after_line = False
 
     prices: dict = {}
     x12: list[tuple[float, float, float]] = []
-    for line, odds in segments:
+    for line, odds, (weight,) in segments:
         if line is None:
             x12 += [t for t in zip(odds[0::3], odds[1::3], odds[2::3]) if _plausible(list(t))]
             continue
@@ -62,10 +69,12 @@ def parse(text: str) -> dict:
             continue
         sides = ("Over", "Under") if kind == "totals" else ("1", "2")
         line = abs(line) if kind == "totals" else line
-        for a, b in zip(odds[0::2], odds[1::2]):
-            if _plausible([a, b]):
-                prices.setdefault((kind, line, sides[0]), []).append(a)
-                prices.setdefault((kind, line, sides[1]), []).append(b)
+        pairs = [(a, b) for a, b in zip(odds[0::2], odds[1::2]) if _plausible([a, b])]
+        # Übersichtszeile (ein Quotenpaar = Durchschnitt) zählt so viel wie ihre Buchmacher
+        pairs = pairs * weight if len(pairs) == 1 else pairs
+        for a, b in pairs:
+            prices.setdefault((kind, line, sides[0]), []).append(a)
+            prices.setdefault((kind, line, sides[1]), []).append(b)
 
     result: dict = {"lines": [], "handicaps": [], "warnings": []}
     for kind, key, a_name, b_name in (("totals", "lines", "Over", "Under"), ("spreads", "handicaps", "1", "2")):

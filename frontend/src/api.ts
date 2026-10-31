@@ -21,6 +21,8 @@ export type Game = {
   stats_imported?: boolean;
   data_level?: string;
   source?: string;
+  stage?: string | null;
+  stage_type?: "league" | "knockout" | "placement" | null;
   home: { id: number; name: string };
   away: { id: number; name: string };
   home_score: number | null;
@@ -96,6 +98,31 @@ export type PasteResult = {
   warnings: string[];
   found: Partial<Record<"over_line" | "odds_over" | "odds_under" | "hdp_line" | "odds_home" | "odds_draw" | "odds_away", number>>;
   saved: boolean;
+};
+
+export type OddsportalResult = {
+  home: string | null;
+  away: string | null;
+  league: string | null;
+  market: string | null; // z. B. "1X2+O/U+AH"
+  period: string;
+  kickoff_local: string | null;
+  score: [number, number] | null;
+  found: Partial<Record<keyof Line, number>>;
+  lines: { line: number; a: number; b: number; count: number }[];
+  handicaps: { line: number; a: number; b: number; count: number }[];
+  warnings: string[];
+  candidates: (Game & { competition: string; match_score: number; reasons: string[] })[];
+  game: (Game & { competition: string }) | null;
+  saved: boolean;
+  remaining: { finished: number; line: number; hdp: number; x12: number } | null; // beendete Spiele ohne Quoten
+};
+export type OddsportalPage = {
+  text?: string;
+  url?: string;
+  pages?: { url: string; text: string; missing?: string }[];
+  title: string;
+  tz_offset: number;
 };
 
 export type Rule = { feature?: string; op?: string; value?: number; formula?: string };
@@ -187,6 +214,10 @@ export const api = {
   games: (competition_id?: number, status?: string) => request<Game[]>(`/games${q({ competition_id, status })}`),
   game: (id: number) => request<GameDetail>(`/games/${id}`),
   setLine: (id: number, line: Partial<Line>) => request(`/games/${id}/line`, { method: "PUT", body: JSON.stringify(line) }),
+  deleteGames: (ids: number[]) =>
+    request<{ deleted: number }>("/games/delete", { method: "POST", body: JSON.stringify({ ids }) }),
+  oddsportalImport: (page: OddsportalPage, game_id?: number) =>
+    request<OddsportalResult>("/oddsportal/import", { method: "POST", body: JSON.stringify({ ...page, game_id }) }),
   pasteOdds: (id: number, text: string, save: boolean) =>
     request<PasteResult>(`/games/${id}/paste-odds`, { method: "POST", body: JSON.stringify({ text, save }) }),
 

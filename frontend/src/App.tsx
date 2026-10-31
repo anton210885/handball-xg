@@ -10,6 +10,7 @@ import LinesPage from "./pages/LinesPage";
 import StrategiesPage from "./pages/StrategiesPage";
 import AnalysisPage from "./pages/AnalysisPage";
 import PredictionsPage from "./pages/PredictionsPage";
+import OddsportalPage from "./pages/OddsportalPage";
 
 type CompCtx = {
   competitions: Competition[];
@@ -124,6 +125,7 @@ export default function App() {
             <Route path="/teams" element={<TeamsPage />} />
             <Route path="/xg" element={<XgPage />} />
             <Route path="/import" element={<ImportPage />} />
+            <Route path="/oddsportal" element={<OddsportalPage />} />
           </Routes>
         </main>
       </div>

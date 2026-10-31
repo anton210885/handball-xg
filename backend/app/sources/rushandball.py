@@ -112,6 +112,20 @@ class RushandballClient:
         return self._get(f"/Api/Online/GetGame/{game_id}", f"stats_{game_id}.json")["Data"]
 
 
+def stage_of(entry: dict) -> tuple[str | None, str | None]:
+    """Phase eines Spiels aus GetCompGames: Name und Art (league / knockout / placement).
+
+    CompTypeId 0 ist ein Rundenturnier: die Hauptrunde oder – mit „Фин. эт.“ – die Platzierungsrunde
+    um die Plätze 9–12. Alles andere sind Serien (Best-of): Viertel-/Halbfinale und Spiele um Plätze."""
+    comp = entry.get("Comp") or {}
+    name = comp.get("ShortName")
+    if name is None:
+        return None, None
+    if comp.get("CompTypeId", 0) != 0:
+        return name, "knockout"
+    return name, "placement" if name.lower().startswith("фин") else "league"
+
+
 def parse_schedule_entry(entry: dict) -> dict:
     """Wandelt einen Eintrag aus GetCompGames in ein flaches Dict um."""
     g = entry["Game"]
@@ -121,6 +135,8 @@ def parse_schedule_entry(entry: dict) -> dict:
         "id": g["GameId"],
         "competition_id": entry["CompId"],
         "game_number": g.get("GameNumber"),
+        "stage": stage_of(entry)[0],
+        "stage_type": stage_of(entry)[1],
         "start_moscow": datetime.fromisoformat(g["MoscowDateTime"]),
         "home": {"id": t1["CompTeam"]["TeamId"], "name": t1["CompTeam"]["Name"], "name_en": t1["CompTeam"].get("NameEng")},
         "away": {"id": t2["CompTeam"]["TeamId"], "name": t2["CompTeam"]["Name"], "name_en": t2["CompTeam"].get("NameEng")},

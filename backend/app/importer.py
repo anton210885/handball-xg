@@ -60,6 +60,7 @@ def import_competition(session: Session, comp_id: int, client: RushandballClient
             # (Vorrunde, Viertelfinale …) – alle zählen zum importierten Wettbewerb.
             game.competition_id = comp_id
             game.game_number = g["game_number"]
+            game.stage, game.stage_type = g["stage"], g["stage_type"]
             game.start_moscow = g["start_moscow"]
             game.home_team_id, game.away_team_id = g["home"]["id"], g["away"]["id"]
             game.home_score, game.away_score = g["home_score"], g["away_score"]

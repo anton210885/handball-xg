@@ -13,6 +13,8 @@ Endpunkte:
 from __future__ import annotations
 
 import json
+import hashlib
+import logging
 import statistics
 import time
 from datetime import datetime, timezone
@@ -29,7 +31,12 @@ SPORT_HANDBALL = 22
 CACHE_DIR = RAW_CACHE_DIR / "oddspapi"
 
 
-MIN_INTERVAL_SEC = 2.5  # Abstand zwischen zwei Abfragen; bei 1,2 s lehnte die API viele mit 429 ab
+MIN_INTERVAL_SEC = 5.1  # /historical-odds verlangt mindestens 5000 ms Abstand.
+
+
+def bookmaker_key(bookmakers: str) -> str:
+    """Gleiche Auswahl unabhängig von Reihenfolge und Leerzeichen."""
+    return ",".join(sorted({b.strip().lower() for b in bookmakers.split(",") if b.strip()}))
 
 
 class BudgetExceeded(RuntimeError):
@@ -38,6 +45,10 @@ class BudgetExceeded(RuntimeError):
 
 class OddsPapiError(RuntimeError):
     """Fehlermeldung ohne Schlüssel (httpx nennt sonst die volle Adresse samt apiKey)."""
+
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def month_key(now: datetime | None = None) -> str:
@@ -54,6 +65,8 @@ class OddsPapiClient:
         if not key:
             raise RuntimeError("ODDSPAPI_KEY fehlt in backend/.env")
         self.session, self.key, self.budget = session, key, budget
+        # httpx protokolliert sonst die vollständige URL einschließlich apiKey auf INFO.
+        logging.getLogger("httpx").setLevel(logging.WARNING)
         self._http = httpx.Client(base_url=BASE_URL, timeout=60)
         self.calls = 0
         self._last = 0.0
@@ -68,6 +81,8 @@ class OddsPapiClient:
         if self.remaining <= 0:
             raise BudgetExceeded(f"OddsPapi-Monatsbudget von {self.budget} Abfragen ist aufgebraucht")
         for attempt in range(4):
+            if self.remaining <= 0:
+                raise BudgetExceeded(f"OddsPapi-Monatsbudget von {self.budget} Abfragen ist aufgebraucht")
             wait = MIN_INTERVAL_SEC - (time.monotonic() - self._last)
             if wait > 0:
                 time.sleep(wait)
@@ -78,13 +93,14 @@ class OddsPapiClient:
             self._last = time.monotonic()
             # Jede Antwort zählt – auch 404 und 429, lieber zu vorsichtig als über dem Kontingent
             self._count()
-            if r.status_code != 429:
+            if r.status_code != 429 and r.status_code < 500:
                 break
-            time.sleep(float(r.headers.get("retry-after") or 10 * (attempt + 1)))
+            if attempt < 3:
+                time.sleep(float(r.headers.get("retry-after") or 5 * (attempt + 1)))
         if r.status_code == 404:
             return None
         if r.status_code != 200:
-            raise OddsPapiError(f"OddsPapi {path}: HTTP {r.status_code}")
+            raise OddsPapiError(f"OddsPapi {path}: HTTP {r.status_code}", status_code=r.status_code)
         data = r.json()
         if cache_name:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -111,7 +127,12 @@ class OddsPapiClient:
         return self._get("/odds", None, fixtureId=fixture_id)
 
     def historical_odds(self, fixture_id: str, bookmakers: str) -> dict | None:
-        return self._get("/historical-odds", f"hist_{fixture_id}.json", fixtureId=fixture_id, bookmakers=bookmakers)
+        books = bookmaker_key(bookmakers)
+        if not 1 <= len(books.split(",")) <= 3 or not books:
+            raise ValueError("Historische Quoten benötigen ein bis drei Buchmacher")
+        digest = hashlib.sha256(books.encode()).hexdigest()[:16]
+        return self._get("/historical-odds", f"hist_{fixture_id}_{digest}.json",
+                         fixtureId=fixture_id, bookmakers=books)
 
 
 # ---------- Quoten auslesen ----------
@@ -120,13 +141,17 @@ def _closing_price(players, start: datetime | None) -> float | None:
     """Aktueller Preis (/odds) oder letzter Preis vor Anpfiff (/historical-odds)."""
     p = (players or {}).get("0")
     if isinstance(p, dict):
-        return p.get("price")
+        # Ein undatierter aktueller Preis ist kein Beleg für eine Vorab-Quote.
+        if start is None:
+            return p.get("price")
+        p = [p]
     if isinstance(p, list) and p:
-        snaps = sorted(p, key=lambda s: s["createdAt"])
+        snaps = sorted((s for s in p if s.get("createdAt") and s.get("active", True)),
+                       key=lambda s: datetime.fromisoformat(s["createdAt"].replace("Z", "+00:00")))
         if start is not None:
-            before = [s for s in snaps if datetime.fromisoformat(s["createdAt"].replace("Z", "+00:00")) <= start]
-            snaps = before or snaps[:1]
-        return snaps[-1].get("price")
+            snaps = [s for s in snaps if datetime.fromisoformat(s["createdAt"].replace("Z", "+00:00")) < start]
+        if snaps:
+            return snaps[-1].get("price")
     return None
 
 

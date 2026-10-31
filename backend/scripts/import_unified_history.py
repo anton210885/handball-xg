@@ -58,6 +58,8 @@ def main():
             if c.id in [6597,7284,8070,6604,7286,8078]:c.country='Russia';c.league='Superliga'
         manifest=json.loads((CACHE/'manifest.json').read_text(encoding='utf-8'))
         for m in manifest:
+            if m.get('disabled'):
+                result['disabled_cache_entries']+=1;continue
             data=json.loads((CACHE/m['file']).read_text(encoding='utf-8'));events={}
             for teams in data.get('tournamentTeamEvents',{}).values():
                 for evs in teams.values():

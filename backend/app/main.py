@@ -17,12 +17,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import features as feat
-from . import odds_paste
+from . import odds_paste, oddsportal_import
+from . import game_admin
 from . import importer, strategies, xg
 from .db import SessionLocal, get_session, init_db
 from . import __version__
 from .legacy import LEGACY_NAMES
-from .config import ODDSPAPI_KEY, ODDSPAPI_SYNC_HOURS
+from .config import DATA_DIR, ODDSPAPI_KEY, ODDSPAPI_SYNC_HOURS
 from . import oddspapi_sync
 from .sources import oddspapi as oddspapi_source
 from .models import Competition, Game, GameLine, Shot, Strategy, Team, AggregateStat, SourceRecord
@@ -59,6 +60,7 @@ def _num(v, digits=2):
 def game_dict(g: Game, xg_sums: dict | None = None, features: dict | None = None) -> dict:
     d = {
         "id": g.id, "competition_id": g.competition_id, "game_number": g.game_number,
+        "stage": g.stage, "stage_type": g.stage_type,
         "source": g.source or "rushandball", "stats_imported": bool(g.stats_imported),
         "data_level": "events" if g.shots_imported else "aggregate" if g.stats_imported else "results",
         "start": g.start_moscow.isoformat(), "finished": g.finished, "shots_imported": g.shots_imported,
@@ -285,6 +287,18 @@ class LineIn(BaseModel):
     odds_under: float | None = None
 
 
+class DeleteGamesIn(BaseModel):
+    ids: list[int]
+
+
+@app.post("/api/games/delete")
+def delete_games(body: DeleteGamesIn, session: Session = Depends(get_session)):
+    """Spiele endgültig löschen (mit Würfen, Linie und Summen). Quelldaten bleiben erhalten."""
+    if not body.ids:
+        raise HTTPException(400, "Keine Spiele ausgewählt")
+    return {"deleted": game_admin.delete_games(session, body.ids)}
+
+
 class PasteIn(BaseModel):
     text: str
     save: bool = False
@@ -306,6 +320,54 @@ def paste_odds(game_id: int, body: PasteIn, session: Session = Depends(get_sessi
         session.add(line)
         session.commit()
     return {**result, "saved": bool(body.save and found), "found": found}
+
+
+class OddsportalIn(BaseModel):
+    text: str = ""
+    url: str = ""
+    pages: list[dict] = []  # mehrere Reiter auf einmal: [{url, text, missing?}]
+    title: str = ""
+    tz_offset: int = 0  # Date.getTimezoneOffset() des Browsers
+    game_id: int | None = None  # von Hand gewähltes Spiel
+    save: bool = True
+
+
+@app.post("/api/oddsportal/import")
+def oddsportal_import_page(body: OddsportalIn, session: Session = Depends(get_session)):
+    """Vom Lesezeichen-Knopf geschickte oddsportal-Seite: Spiel finden und Quoten des Reiters speichern."""
+    info = (oddsportal_import.parse_pages(body.pages, body.title, body.tz_offset) if body.pages
+            else oddsportal_import.parse_page(body.text, body.url, body.title, body.tz_offset))
+    if not body.game_id:
+        # Letzte empfangene Seite aufheben – zum Nachvollziehen, falls etwas nicht erkannt wird
+        (DATA_DIR / "oddsportal_last.json").write_text(body.model_dump_json(indent=1), encoding="utf-8")
+    cands = oddsportal_import.candidates(session, info)
+    game = session.get(Game, body.game_id) if body.game_id else oddsportal_import.pick(cands)
+    if body.game_id and game is None:
+        _404()
+    saved = bool(body.save and game and info["found"])
+    if saved:
+        oddsportal_import.save(session, info, game)
+        session.refresh(game)
+    out = {k: v.isoformat() if isinstance(v, datetime) else v for k, v in info.items()}
+    comp_label = lambda c: f"{c.season} · {c.name}" if c else ""
+    return {
+        **out,
+        "candidates": [{**game_dict(c["game"]), "competition": comp_label(c["competition"]),
+                        "match_score": c["score"], "reasons": c["reasons"]} for c in cands],
+        "game": game_dict(game) | {"competition": comp_label(session.get(Competition, game.competition_id))} if game else None,
+        "saved": saved,
+        "remaining": oddsportal_import.remaining(session, game.competition_id) if saved else None,
+    }
+
+
+class OddsportalListIn(BaseModel):
+    rows: list[dict] = Field(default_factory=list, max_length=500)  # [{id, href, text}]
+
+
+@app.post("/api/oddsportal/list")
+def oddsportal_list(body: OddsportalListIn, session: Session = Depends(get_session)):
+    """Ergebnisliste auf oddsportal: welche Spiele im Tool noch Quoten brauchen (für die Markierung)."""
+    return {"rows": oddsportal_import.list_status(session, body.rows)}
 
 
 @app.put("/api/games/{game_id}/line")
@@ -611,4 +673,6 @@ if FRONTEND_DIST.exists():
         file = FRONTEND_DIST / path
         if path and file.is_file() and FRONTEND_DIST in file.resolve().parents:
             return FileResponse(file)
-        return FileResponse(FRONTEND_DIST / "index.html")  # React Router übernimmt
+        # React Router übernimmt. Nie zwischenspeichern: sonst lädt Chrome nach einem Update das alte Programm
+        # (die Dateien unter /assets tragen ihren Stand im Namen und dürfen im Speicher bleiben).
+        return FileResponse(FRONTEND_DIST / "index.html", headers={"Cache-Control": "no-cache"})

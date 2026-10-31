@@ -4,13 +4,15 @@ import { api } from "../api";
 import { useCompetition } from "../App";
 import { dateTime, fmt } from "../labels";
 import { useLoad } from "../useLoad";
+import StageTag, { STAGE_FILTER } from "../components/StageTag";
 
 export default function GamesPage() {
   const { competitionId } = useCompetition();
   const [status, setStatus] = useState("finished");
   const { data, error, loading } = useLoad(() => api.games(competitionId, status), [competitionId, status]);
   const nav = useNavigate();
-  const games = status === "finished" ? [...(data ?? [])].reverse() : data ?? [];
+  const [stage, setStage] = useState("");
+  const games = (status === "finished" ? [...(data ?? [])].reverse() : data ?? []).filter(STAGE_FILTER[stage].test);
 
   return (
     <>
@@ -21,6 +23,11 @@ export default function GamesPage() {
           <option value="open">Offen</option>
           <option value="">Alle</option>
         </select>
+        <select value={stage} onChange={(e) => setStage(e.target.value)} title="Nach Spielphase filtern">
+          {Object.entries(STAGE_FILTER).map(([k, v]) => (
+            <option key={k} value={k}>{v.label}</option>
+          ))}
+        </select>
       </div>
       {error && <div className="error">{error}</div>}
       <div className="panel table-wrap">
@@ -29,6 +36,7 @@ export default function GamesPage() {
           <thead>
             <tr>
               <th>Datum (MSK)</th>
+              <th>Phase</th>
               <th>Heim</th>
               <th>Gast</th>
               <th className="num">Ergebnis</th>
@@ -45,6 +53,9 @@ export default function GamesPage() {
               return (
                 <tr key={g.id} className="click" onClick={() => nav(`/spiele/${g.id}`)}>
                   <td>{dateTime(g.start)}</td>
+                  <td className="small" title={g.stage ?? undefined}>
+                    {g.stage_type ? (g.stage_type === "league" ? "Hauptrunde" : <StageTag game={g} />) : <span className="muted">–</span>}
+                  </td>
                   <td>{g.home.name}</td>
                   <td>{g.away.name}</td>
                   <td className="num">{g.finished ? `${g.home_score}:${g.away_score}` : "–"}</td>

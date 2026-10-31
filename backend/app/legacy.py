@@ -7,7 +7,7 @@ So lassen sich die alten Strategien als Formeln fast wörtlich übernehmen, z. B
   XGD  (Tore − xG)                 = finishing
   XGAD (Gegentore − xG gegen)      = −keeper
   home_expGoal                     = pred_home  ((Ø xG Heim + Ø xG gegen Gast) / 2)
-  tour (Spieltag)                  ≈ min(Spiele Heim, Spiele Gast) + 1
+  tour (Spieltag)                  ≈ min(Spiele Heim, Spiele Gast) + 1; KO-Spiele wie in Access = 40
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def legacy_metrics(f: dict, gender: str | None) -> dict:
     g = f.get
     m: dict = {
         "sex": gender,
-        "tour": min(g("home_games", 0), g("away_games", 0)) + 1,
+        "tour": 40 if g("is_knockout") == 1 else min(g("home_games", 0), g("away_games", 0)) + 1,
         "home": g("odds_home"), "Draw": g("odds_draw"), "away": g("odds_away"),
         "over": g("over_line"), "hdp": g("hdp_line"),
         "Home_avgXG": g("home_avg_xg"), "Away_avgXG": g("away_avg_xg"),

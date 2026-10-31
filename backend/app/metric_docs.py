@@ -71,7 +71,7 @@ TEAM = {'avg_goals': ('Erzielte Tore je früherem Spiel.', 'gewichteter Mittelwe
  'games': ('Anzahl früherer Spiele derselben Saison mit importierten Würfen.',
            'Anzahl abgeschlossener Spiele an früheren Kalendertagen)')}
 LEGACY_FORMULAS = {'sex': 'gender',
- 'tour': 'min(home_games, away_games) + 1',
+ 'tour': '40 bei KO-Spiel, sonst min(home_games, away_games) + 1',
  'home': 'odds_home',
  'Draw': 'odds_draw',
  'away': 'odds_away',
@@ -141,6 +141,11 @@ def metric_docs():
         if key in BASE:
             description, formula = BASE[key]
             source = HISTORY + " " + XG
+        elif key in ("is_knockout", "is_league"):
+            description = ("1, wenn das Spiel laut Quelle ein KO-Spiel ist (Viertel-/Halbfinale, Finale, Spiele um Plätze), sonst 0."
+                           if key == "is_knockout" else "1, wenn das Spiel zur Hauptrunde gehört, sonst 0 (KO-Spiel oder Platzierungsrunde 9–12).")
+            description += " Leer, wenn die Quelle keine Phase kennt (Bundesliga, EHF)."
+            formula, source = "Spielphase: " + key, "rushandball-Spielplan (Russland), koreahandball (Korea), Access-Spalte tour (40 = Playoff)."
         elif key in ("over_line", "hdp_line") or key.startswith("odds_"):
             description = "Bookmaker-Gesamttorlinie für Over/Under." if key == "over_line" else "Handicap aus Sicht des Heimteams." if key == "hdp_line" else "Dezimalquote für " + label.replace("Quote ", "") + "."
             formula, source = "Direkte Eingabe: " + key, BOOK
@@ -155,7 +160,7 @@ def metric_docs():
     for key in LEGACY_NAMES:
         formula = LEGACY_FORMULAS[key]
         description = "Alter Formelname; Berechnung aus den oben dokumentierten Vor-Spiel-Werten. Fehlende Eingaben oder Division durch 0 ergeben keinen Wert."
-        if key == "tour": description = "Näherung für den Spieltag; kein offizieller Spieltag: min(home_games, away_games) + 1."
+        if key == "tour": description = "Wie in der Access-Datenbank: 40 bei einem KO-Spiel, sonst Näherung für den Spieltag: min(home_games, away_games) + 1."
         if key == "sex": description = "Bekannte Geschlechtsgruppe des Wettbewerbs (men/women); keine numerische Korrelationsmetrik."
         if key == "last5_Games_powerRaiting_XGA": description = "Historischer Kompatibilitätsname: berechnet tatsächlich den Quotienten eigener xG-Mediane, nicht xG gegen."
         if formula in docs:

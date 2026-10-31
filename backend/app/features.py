@@ -48,6 +48,8 @@ FEATURES: dict[str, str] = {
     "hdp_line": "Handicap Heim",
     "home_games": "Heim: Spiele bisher",
     "away_games": "Gast: Spiele bisher",
+    "is_knockout": "KO-Spiel (1 = Playoff/Platzierungsserie, 0 = Hauptrunde)",
+    "is_league": "Hauptrunde (1 = ja, 0 = KO-Spiel oder Platzierungsrunde)",
 }
 _TEAM_FEATURES = {
     "avg_goals": "Ø Tore",
@@ -231,6 +233,9 @@ def all_game_features(session: Session, competition_id: int | None = None,
             return _team_form(history, prior, prior_weight)
 
         feats = match_features(form(g.home_team_id), form(g.away_team_id), g.line)
+        # Spielphase laut Quelle; unbekannt (z. B. Bundesliga) bleibt leer
+        feats["is_knockout"] = None if g.stage_type is None else int(g.stage_type == "knockout")
+        feats["is_league"] = None if g.stage_type is None else int(g.stage_type == "league")
         feats.update(legacy_metrics(feats, comp.gender))
         rows.append({"game": g, "features": feats})
     return rows

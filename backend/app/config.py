@@ -1,5 +1,6 @@
 """Zentrale Einstellungen. Werte kommen aus backend/.env oder Umgebungsvariablen."""
 import os
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -26,12 +27,26 @@ ODDSPAPI_SYNC_HOURS = float(os.getenv("ODDSPAPI_SYNC_HOURS", "6"))
 ODDSPAPI_PREMATCH_DAYS = float(os.getenv("ODDSPAPI_PREMATCH_DAYS", "2"))
 # Vorab-Quoten eines Spiels frühestens nach x Stunden erneut holen
 ODDSPAPI_PREMATCH_REFRESH_HOURS = float(os.getenv("ODDSPAPI_PREMATCH_REFRESH_HOURS", "12"))
+# Laut OddsPapi-Dokumentation beginnt das historische Archiv im Januar 2026.
+ODDSPAPI_HISTORY_SINCE = datetime.fromisoformat(os.getenv("ODDSPAPI_HISTORY_SINCE", "2026-01-01"))
 # (Land, Liga, Geschlecht) -> OddsPapi-Turnier
 ODDSPAPI_TOURNAMENTS = {
     ("Russia", "Superliga", "men"): 1143,
     ("Russia", "Superliga", "women"): 1394,
     ("Korea", "H League", "men"): 36187,
     ("Korea", "H League", "women"): 38953,
+    ("Germany", "Bundesliga", "men"): 149,
+    ("Germany", "Bundesliga", "women"): 245,
+    ("Germany", "2. Bundesliga", "men"): 921,
+    ("Germany", "2. Bundesliga", "women"): 33055,
+    ("Croatia", "Premijer liga", "men"): 576,
+    ("Croatia", "HRL", "women"): 577,
+    ("Romania", "Liga nationala", "men"): 1396,
+    ("Romania", "Liga nationala", "women"): 1398,
+    ("International", "EHF Champions League", "men"): 30,
+    ("International", "EHF Champions League", "women"): 288,
+    ("International", "EHF European League", "men"): 59,
+    ("International", "EHF European League", "women"): 60,
 }
 # Hauptlinie: Over- und Under-Quote liegen beide in diesem Bereich
 MAIN_LINE_MIN_ODDS, MAIN_LINE_MAX_ODDS = 1.70, 2.00

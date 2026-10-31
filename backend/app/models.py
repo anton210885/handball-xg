@@ -42,6 +42,17 @@ class Team(Base):
     oddspapi_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+class TeamAlias(Base):
+    """Wie ein Team bei einer fremden Quelle heißt (z. B. „St. Petersburg“ bei oddsportal = Зенит).
+
+    Wird gemerkt, sobald ein Spiel sicher zugeordnet oder von Hand bestätigt wurde."""
+
+    __tablename__ = "team_aliases"
+    source: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, primary_key=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"))
+
+
 class Game(Base):
     __tablename__ = "games"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)  # rushandball GameId
@@ -51,6 +62,10 @@ class Game(Base):
     stats_imported: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     date_quality: Mapped[str | None] = mapped_column(String, nullable=True)
     game_number: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Spielphase laut Quelle, z. B. „1/4 финала (2)“; stage_type: league (Hauptrunde),
+    # knockout (KO-Serie: Viertel-/Halbfinale, Platzierungsspiele) oder placement (Platzierungsrunde 9–12)
+    stage: Mapped[str | None] = mapped_column(String, nullable=True)
+    stage_type: Mapped[str | None] = mapped_column(String, nullable=True)
     start_moscow: Mapped[datetime] = mapped_column(DateTime)
     home_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"))
     away_team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"))
@@ -63,6 +78,8 @@ class Game(Base):
     oddspapi_fixture_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # pre = Vorab-Quoten geholt, close = Schlusskurse geholt, none = OddsPapi hat keine Daten
     oddspapi_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Buchmacherauswahl der zuletzt geprüften Historie (alte Einträge werden einmal neu geprüft).
+    oddspapi_bookmakers: Mapped[str | None] = mapped_column(String, nullable=True)
     # True, wenn Teilnehmer 1 bei OddsPapi unser Gastteam ist
     oddspapi_swapped: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Ballbesitze laut rushandball (Angriffe), für Tempo-Kennzahlen

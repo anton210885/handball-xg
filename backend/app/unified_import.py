@@ -72,6 +72,23 @@ def merge_line(session,game,row):
 
 def import_event(session,event,meta):
     ext=event['id'];gid=stable_id('game','handballapi',ext)
+    def reject(status):
+        key=f'api:event:{ext}'
+        previous=session.get(SourceRecord,key)
+        if previous is not None and previous.game_id is not None:
+            # Ein neuer Fehlversuch darf die Quelle eines bereits gültigen Spiels nicht verdrängen.
+            key=f"api:rejected:{status}:{meta['tournament_id']}:{ext}"
+        record(session,key,event,status=status)
+    tournament=event.get('tournament') or {}
+    sport=(tournament.get('category') or {}).get('sport') or {}
+    # Sofascore/HandballAPI: Handball hat Sport-ID 6. Ein URL-Präfix allein reicht nicht.
+    if sport.get('id') not in (None,6) or sport.get('slug') not in (None,'handball'):
+        reject('rejected_wrong_sport');return None
+    actual_id=(tournament.get('uniqueTournament') or {}).get('id')
+    if actual_id is not None and str(actual_id)!=str(meta['tournament_id']):
+        reject('rejected_wrong_tournament');return None
+    if meta.get('country')=='Germany' and meta.get('league')=='2. Bundesliga' and meta.get('gender')=='men' and meta.get('tournament_id')!=921:
+        reject('rejected_wrong_tournament');return None
     ts=number(event.get('startTimestamp'))
     if ts is None or not event.get('homeTeam') or not event.get('awayTeam'):
         record(session,f'api:event:{ext}',event,status='missing_date_or_teams');return None

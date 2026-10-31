@@ -3,6 +3,7 @@ import { api, Line } from "../api";
 import { useCompetition } from "../App";
 import { dateTime, fmt } from "../labels";
 import { useLoad } from "../useLoad";
+import StageTag from "../components/StageTag";
 
 const SOURCE: Record<string, string> = {
   "oddspapi-pre": "OddsPapi (vor dem Spiel)",
@@ -72,6 +73,7 @@ export default function PredictionsPage() {
                     <Link to={`/spiele/${g.id}`}>
                       {g.home.name} – {g.away.name}
                     </Link>
+                    <StageTag game={g} />
                   </td>
                   <td className="num">{fmt(g.features?.pred_home)}</td>
                   <td className="num">{fmt(g.features?.pred_away)}</td>
