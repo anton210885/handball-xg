@@ -153,6 +153,13 @@ def import_lineups(session,game,data,source="handballapi"):
 
 def import_access_game(session,row,players=None):
     rid=count(row.get('ID_Game'));key=f'access:RusHandbal:game:{rid}'
+    # Von Hand gelöscht oder in ein anderes Spiel überführt: nicht wieder anlegen, nur fehlende Quoten ergänzen
+    prev=session.get(SourceRecord,key)
+    if prev is not None and prev.status=='game_deleted':return None
+    if prev is not None and prev.status=='merged' and prev.game_id:
+        g=session.get(Game,prev.game_id)
+        if g is not None:merge_line(session,g,row)
+        return g
     country=clean_name(row.get('ID_country'));gender=clean_name(row.get('sex')).lower();raw_league=clean_name(row.get('League'))
     league={'Croatia':'HRL' if gender=='women' else 'Premijer liga','Romania':'Liga nationala','Korea':'H League'}.get(country,raw_league)
     if gender not in ('men','women') or not row.get('Datum') or not row.get('home_team') or not row.get('away_team'):

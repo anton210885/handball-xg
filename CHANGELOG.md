@@ -2,6 +2,10 @@
 
 Die Versionsnummer steht in `backend/app/__init__.py` und `frontend/package.json` (ein Test prüft, dass beide gleich sind). Sie wird im Seitenmenü und unter `/api/version` angezeigt.
 
+## 0.8.2 – 2026-11-01
+- Korea 24/25: vier falsch eingeordnete Access-Spiele bereinigt. Drei waren doppelt (Geschlecht vertauscht, „Buzau W“ statt Busan W) und wurden mit dem echten Spiel von koreahandball zusammengeführt, dessen Linie und Quoten jetzt übernommen sind. Ein Spiel ohne Gegenstück (Incheon City – Chungnam, 16.03.25) wurde gelöscht, ebenso fünf verwaiste Teams. Die Rohdaten bleiben erhalten.
+- `game_admin.merge_duplicate`: doppeltes Spiel in das richtige überführen. Der Access-Import legt gelöschte oder zusammengeführte Spiele nicht wieder an.
+
 ## 0.8.1 – 2026-10-31
 - **Automatischer Import** der laufenden Saisons (Russland, Korea) alle 6 Stunden (`AUTO_IMPORT_HOURS`): neue Ergebnisse, Würfe (frühestens 3 Stunden nach Anpfiff) und geänderte Anstoßzeiten, danach xG neu. Stand auf „Daten-Import“.
 
