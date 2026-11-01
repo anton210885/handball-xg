@@ -2,6 +2,9 @@
 
 Die Versionsnummer steht in `backend/app/__init__.py` und `frontend/package.json` (ein Test prüft, dass beide gleich sind). Sie wird im Seitenmenü und unter `/api/version` angezeigt.
 
+## 0.8.3 – 2026-11-01
+- **Spielstatistik** auf jeder Spielseite mit Würfen (Russland und Korea): je Team eine Spielertabelle mit Tore/Würfe, Quote, Zonen (6 m, Außen, 9 m, 7 m, Gegenstoß, Durchbruch, leeres Tor) und xG sowie eine Torhütertabelle mit Paraden je Zone, aufgebaut wie die Statistik von koreahandball.
+
 ## 0.8.2 – 2026-11-01
 - Korea 24/25: vier falsch eingeordnete Access-Spiele bereinigt. Drei waren doppelt (Geschlecht vertauscht, „Buzau W“ statt Busan W) und wurden mit dem echten Spiel von koreahandball zusammengeführt, dessen Linie und Quoten jetzt übernommen sind. Ein Spiel ohne Gegenstück (Incheon City – Chungnam, 16.03.25) wurde gelöscht, ebenso fünf verwaiste Teams. Die Rohdaten bleiben erhalten.
 - `game_admin.merge_duplicate`: doppeltes Spiel in das richtige überführen. Der Access-Import legt gelöschte oder zusammengeführte Spiele nicht wieder an.

@@ -1,5 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
+import BoxScore from "../components/BoxScore";
 import CourtMap from "../components/CourtMap";
 import GoalMap from "../components/GoalMap";
 import { ATTACK_LABEL, dateTime, fmt, OUTCOME_LABEL, pct, ZONE_LABEL } from "../labels";
@@ -75,6 +76,8 @@ export default function GameDetailPage() {
               </div>
             ))}
           </div>
+          <BoxScore shots={g.shots} team={g.home.name} isHome />
+          <BoxScore shots={g.shots} team={g.away.name} isHome={false} />
           <div className="panel table-wrap">
             <h2>Alle Würfe ({g.shots.length})</h2>
             <table>
