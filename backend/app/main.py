@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from . import features as feat
 from . import odds_paste, oddsportal_import
-from . import game_admin
+from . import game_admin, game_export
 from . import importer, strategies, xg
 from .db import SessionLocal, get_session, init_db
 from . import __version__
@@ -251,6 +251,16 @@ def list_games(competition_id: int | None = None, status: str | None = None, ses
             continue
         out.append(game_dict(g, sums, r["features"]))
     return out
+
+
+@app.get("/api/games/export.xlsx")
+def export_games(competition_id: int | None = None, stage: str = "", session: Session = Depends(get_session)):
+    """Beendete Spiele mit allen Metriken (Stand vor Anpfiff) als Excel-Datei."""
+    rows = game_export.finished_rows(session, competition_id, stage, _xg_sums(session))
+    comp = session.get(Competition, competition_id) if competition_id else None
+    name = f"spiele_{comp.season.replace('/', '-')}_{comp.gender}.xlsx" if comp else "spiele.xlsx"
+    return Response(game_export.to_xlsx(rows), headers={"Content-Disposition": f'attachment; filename="{name}"'},
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 @app.get("/api/games/{game_id}")

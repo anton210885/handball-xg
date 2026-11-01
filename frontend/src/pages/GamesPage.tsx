@@ -4,12 +4,17 @@ import { api } from "../api";
 import { useCompetition } from "../App";
 import { dateTime, fmt } from "../labels";
 import { useLoad } from "../useLoad";
+import MetricsTable from "../components/MetricsTable";
 import StageTag, { STAGE_FILTER } from "../components/StageTag";
 
 export default function GamesPage() {
   const { competitionId } = useCompetition();
   const [status, setStatus] = useState("finished");
-  const { data, error, loading } = useLoad(() => api.games(competitionId, status), [competitionId, status]);
+  // „Alle Metriken“ zeigt nur beendete Spiele, mit jedem Wert vor Anpfiff
+  const [view, setView] = useState("overview");
+  const metrics = view === "metrics";
+  const { data, error, loading } = useLoad(() => api.games(competitionId, metrics ? "finished" : status), [competitionId, status, metrics]);
+  const meta = useLoad(() => api.meta(), []);
   const nav = useNavigate();
   const [stage, setStage] = useState("");
   const games = (status === "finished" ? [...(data ?? [])].reverse() : data ?? []).filter(STAGE_FILTER[stage].test);
@@ -18,18 +23,33 @@ export default function GamesPage() {
     <>
       <div className="topbar">
         <h1>Spiele</h1>
-        <select value={status} onChange={(e) => setStatus(e.target.value)}>
+        <select value={view} onChange={(e) => setView(e.target.value)} title="Ansicht">
+          <option value="overview">Übersicht</option>
+          <option value="metrics">Alle Metriken (beendet)</option>
+        </select>
+        {!metrics && <select value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="finished">Beendet</option>
           <option value="open">Offen</option>
           <option value="">Alle</option>
-        </select>
+        </select>}
         <select value={stage} onChange={(e) => setStage(e.target.value)} title="Nach Spielphase filtern">
           {Object.entries(STAGE_FILTER).map(([k, v]) => (
             <option key={k} value={k}>{v.label}</option>
           ))}
         </select>
+        {metrics && <button onClick={() => (window.location.href = api.gamesExportUrl(competitionId, stage))}>Als Excel herunterladen</button>}
       </div>
       {error && <div className="error">{error}</div>}
+      {metrics ? (
+        <div className="panel">
+          {loading && <div className="muted">Lade …</div>}
+          <div className="small muted" style={{ marginBottom: 8 }}>
+            {games.length} beendete Spiele · alle Metriken mit dem Stand vor Anpfiff, wie die Strategien sie sehen · Spaltenname
+            zeigen für die Beschreibung, anklicken zum Sortieren, Zeile anklicken für das Spiel
+          </div>
+          <MetricsTable games={games} labels={meta.data?.features ?? {}} />
+        </div>
+      ) : (
       <div className="panel table-wrap">
         {loading && <div className="muted">Lade …</div>}
         <table>
@@ -70,6 +90,7 @@ export default function GamesPage() {
           </tbody>
         </table>
       </div>
+      )}
     </>
   );
 }

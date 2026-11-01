@@ -214,6 +214,7 @@ export const api = {
     request<{ running: boolean; done: number; total: number; message: string; errors: string[] }>("/import/status"),
 
   games: (competition_id?: number, status?: string) => request<Game[]>(`/games${q({ competition_id, status })}`),
+  gamesExportUrl: (competition_id?: number, stage?: string) => `/api/games/export.xlsx${q({ competition_id, stage })}`,
   game: (id: number) => request<GameDetail>(`/games/${id}`),
   setLine: (id: number, line: Partial<Line>) => request(`/games/${id}/line`, { method: "PUT", body: JSON.stringify(line) }),
   deleteGames: (ids: number[]) =>

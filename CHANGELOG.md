@@ -2,6 +2,10 @@
 
 Die Versionsnummer steht in `backend/app/__init__.py` und `frontend/package.json` (ein Test prüft, dass beide gleich sind). Sie wird im Seitenmenü und unter `/api/version` angezeigt.
 
+## 0.9.0 – 2026-11-01
+- **„Spiele“ → „Alle Metriken (beendet)“**: jedes beendete Spiel mit Ergebnis, xG und allen 61 Metriken (Stand vor Anpfiff, wie die Strategien sie sehen); jede Spalte sortierbar, Beschreibung beim Zeigen auf den Spaltennamen.
+- **Excel-Export** (`/api/games/export.xlsx`): dieselben Spiele mit Halbzeit, Linie, Handicap, Ausgang Over und Handicap und allen Metriken samt den alten Access-Namen; zweites Blatt mit den Beschreibungen. Neue Abhängigkeit `openpyxl`.
+
 ## 0.8.3 – 2026-11-01
 - **Spielstatistik** auf jeder Spielseite mit Würfen (Russland und Korea): je Team eine Spielertabelle mit Tore/Würfe, Quote, Zonen (6 m, Außen, 9 m, 7 m, Gegenstoß, Durchbruch, leeres Tor) und xG sowie eine Torhütertabelle mit Paraden je Zone, aufgebaut wie die Statistik von koreahandball.
 
