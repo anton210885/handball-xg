@@ -139,3 +139,76 @@ def _store_shots(session: Session, game: Game, match: frhlive.FrhMatch):
             outcome=s.outcome, court_zone=s.zone, goal_zone=s.goal_zone, attack_type=s.attack_type, assisted=s.assisted,
         ))
     game.shots_imported = True
+
+
+# Teamnamen bei der HandballAPI (Sofascore), ohne Akzente -> Teamname im Access-Bestand
+HANDBALLAPI_NAMES = {
+    "men": {"CS Dinamo Bucuresti": "Din. Bucuresti", "CSU Suceava": "Suceava", "CS Universitatea Cluj-Napoca": "Cluj",
+            "CSM Vaslui": "Vaslui", "CSM Constanta": "CSM Constanta", "AHC Potaissa Turda": "Potaissa Turda",
+            "CSM Sighisoara": "Sighisoara", "CSM Bucuresti": "CSM Bucuresti", "CS Minaur Baia Mare": "Minaur Baia Mare",
+            "SCM Politehnica Timisoara": "Timisoara", "HC Buzau": "Buzau", "CS Medgidia": "Medgidia", "CSU Pitesti": "Pitesti",
+            "CSA Steaua Bucuresti": "Steaua Bucuresti"},
+    "women": {"CSM Galati": "Galati W", "CS Rapid Bucuresti": "Rapid Bucuresti W", "CS Minaur Baia Mare": "Baia Mare W",
+              "SCM Ramnicu Valcea": "Ramnicu Valcea W", "CSM Targu Jiu": "Targu Jiu W", "CSM Slatina": "CSM Slatina W",
+              "HC Zalau": "Zalau W", "HC Dunarea Braila": "Dunarea Braila W", "SCM Craiova": "SCM Craiova W",
+              "ASC Corona 2010 Brasov": "Corona Brasov W", "CSM Bucuresti": "CSM Bucuresti W",
+              "CS Gloria 2018 Bistrita-Nasaud": "Bistrita W", "CSU Stiinta Bucuresti": "Stiinta Bucuresti W",
+              "CSM Roman": "Roman W", "CSM Iasi 2020": "Iasi W"},
+}
+
+
+def _plain(name: str) -> str:
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c)).strip()
+
+
+def import_handballapi_results(session: Session, events: list[dict], gender: str, season: str) -> dict:
+    """Ergebnisse einer Saison aus der HandballAPI ergänzen (ohne Würfe): nur Spiele, die es noch nicht gibt.
+    Ein vorhandenes Spiel (gleiche Teams, ±2 Tage, auch vertauscht) bleibt, wie es ist; fehlt ihm die Halbzeit, wird sie ergänzt."""
+    from datetime import timezone
+    report: Counter = Counter()
+    problems: list[str] = []
+    comp = canonical_competition(session, COUNTRY, LEAGUE, gender, season, "handballapi")
+    names = HANDBALLAPI_NAMES[gender]
+    for e in events:
+        if (e.get("status") or {}).get("type") != "finished":
+            report["nicht gespielt"] += 1
+            continue
+        home_name, away_name = _plain(e["homeTeam"]["name"]), _plain(e["awayTeam"]["name"])
+        if home_name not in names or away_name not in names:
+            problems.append(f"Unbekanntes Team: {home_name} – {away_name}")
+            report["unbekanntes Team"] += 1
+            continue
+        start = datetime.fromtimestamp(e["startTimestamp"], timezone.utc).replace(tzinfo=None) + timedelta(hours=3)
+        home = canonical_team(session, COUNTRY, gender, names[home_name], "access").id
+        away = canonical_team(session, COUNTRY, gender, names[away_name], "access").id
+        hs, as_ = e.get("homeScore") or {}, e.get("awayScore") or {}
+        score = (hs.get("normaltime", hs.get("current")), as_.get("normaltime", as_.get("current")))
+        ht = (hs.get("period1"), as_.get("period1"))
+        existing = session.scalars(select(Game).where(
+            Game.competition_id == comp.id, Game.start_moscow >= start - timedelta(days=2), Game.start_moscow <= start + timedelta(days=2),
+            ((Game.home_team_id == home) & (Game.away_team_id == away)) | ((Game.home_team_id == away) & (Game.away_team_id == home)),
+        )).unique().first()
+        if existing:
+            if existing.home_ht is None and existing.home_team_id == home and None not in ht:
+                existing.home_ht, existing.away_ht = ht
+                report["Halbzeit ergänzt"] += 1
+            report["schon vorhanden"] += 1
+            continue
+        gid = stable_id("game", "handballapi", e["id"])
+        round_info = e.get("roundInfo") or {}
+        game = session.get(Game, gid) or Game(id=gid, source="handballapi", external_id=str(e["id"]), shots_imported=False, stats_imported=False)
+        game.competition_id, game.home_team_id, game.away_team_id = comp.id, home, away
+        game.start_moscow, game.date_quality, game.handballapi_event_id = start, "official_api", e["id"]
+        game.home_score, game.away_score = score
+        game.home_ht, game.away_ht = ht
+        game.finished = None not in score
+        game.game_number = str(round_info["round"]) if round_info.get("round") else None
+        game.stage, game.stage_type = ("Hauptrunde", "league") if not round_info.get("name") else (round_info["name"], None)
+        session.add(game)
+        session.flush()
+        session.merge(SourceRecord(key=f"api:event:{e['id']}", game_id=game.id, payload=e, status="imported"))
+        report["neu angelegt"] += 1
+    link_priors(session)
+    session.commit()
+    return {"report": dict(report), "problems": problems}

@@ -86,3 +86,33 @@ def test_import_maps_teams_and_stores_shots_only_when_goals_match(monkeypatch):
         assert romania_import.import_romania(s, FakeClient())["report"]["mit Würfen"] == 1
         assert s.scalar(select(func.count()).select_from(Shot)) == 4 and s.get(Game, g.id).shots_imported
     engine.dispose()
+
+
+def test_handballapi_results_fill_only_missing_games():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    def event(eid, home, away, ts, hs, as_, status="finished"):
+        return {"id": eid, "homeTeam": {"name": home}, "awayTeam": {"name": away}, "startTimestamp": ts,
+                "status": {"type": status}, "homeScore": {"normaltime": hs, "period1": 10}, "awayScore": {"normaltime": as_, "period1": 9},
+                "roundInfo": {"round": 14}}
+
+    with Session(engine) as s:
+        comp = romania_import.canonical_competition(s, "Romania", "Liga nationala", "men", "25/26", "access")
+        a = romania_import.canonical_team(s, "Romania", "men", "Din. Bucuresti", "access")
+        b = romania_import.canonical_team(s, "Romania", "men", "Suceava", "access")
+        s.add(Game(id=1, competition_id=comp.id, home_team_id=b.id, away_team_id=a.id, start_moscow=datetime(2025, 12, 14),
+                   home_score=27, away_score=42, finished=True, source="access"))
+        s.commit()
+        events = [
+            event(10, "CSU Suceava", "CS Dinamo București", 1765720800, 27, 42),  # 14.12.2025 – gibt es schon
+            event(11, "CS Dinamo București", "CSU Suceava", 1772312400, 35, 25),  # 28.02.2026 – fehlt
+            event(12, "CS Dinamo București", "CSU Suceava", 1772312400, None, None, "postponed"),
+            event(13, "Unbekannt", "CSU Suceava", 1772312400, 1, 2),
+        ]
+        result = romania_import.import_handballapi_results(s, events, "men", "25/26")
+        assert result["report"] == {"schon vorhanden": 1, "Halbzeit ergänzt": 1, "neu angelegt": 1, "nicht gespielt": 1, "unbekanntes Team": 1}
+        new = s.scalars(select(Game).where(Game.source == "handballapi")).one()
+        assert (new.home_team_id, new.home_score, new.away_score, new.home_ht, new.game_number) == (a.id, 35, 25, 10, "14")
+        assert s.get(Game, 1).home_ht == 10
+    engine.dispose()

@@ -2,6 +2,9 @@
 
 Die Versionsnummer steht in `backend/app/__init__.py` und `frontend/package.json` (ein Test prüft, dass beide gleich sind). Sie wird im Seitenmenü und unter `/api/version` angezeigt.
 
+## 0.10.1 – 2026-11-02
+- **Rumänien 25/26 vervollständigt**: Access endete im Dezember 2025; die Ergebnisse von Januar bis Mai 2026 kommen jetzt aus der HandballAPI (Männer 62, Frauen 78 Spiele, mit Halbzeit, ohne Würfe), dazu Halbzeitstände für 111 Access-Spiele. Zwei doppelte Access-Spiele zusammengeführt. `scripts\import_romania_history.py` liest die gespeicherten Antworten unter `data/handballapi/ro_events_*`.
+
 ## 0.10.0 – 2026-11-02
 - **Rumänien** (Liga Zimbrilor, Liga Florilor) von frhlive2.com, der Live-Statistik des Verbands: laufende Saison 26/27 mit Spielplan, Ergebnis, Halbzeit und jedem Wurf aus dem Spielverlauf (Zone mit Seite, Ergebnis, Torzone, Werfer, Torwart, Vorlage). Teams wie im Access-Bestand, Vorsaison verknüpft. Im automatischen Import enthalten; von Hand `scripts\import_romania.py`. Erster Lauf: 314 Spiele, alle 90 beendeten mit Würfen.
 - Spielseite nennt die tatsächliche Quelle (koreahandball.com, frhlive2.com) statt „Access-Bestandsimport“.
