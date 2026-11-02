@@ -6,6 +6,8 @@ import GoalMap from "../components/GoalMap";
 import { ATTACK_LABEL, dateTime, fmt, OUTCOME_LABEL, pct, ZONE_LABEL } from "../labels";
 import { useLoad } from "../useLoad";
 
+const SOURCE_LABEL: Record<string, string> = { handballapi: "HandballAPI", koreahandball: "koreahandball.com", frhlive: "frhlive2.com" };
+
 export default function GameDetailPage() {
   const id = Number(useParams().id);
   const { data: g, error } = useLoad(() => api.game(id), [id]);
@@ -25,7 +27,7 @@ export default function GameDetailPage() {
           </h1>
           <div className="muted small">
             {dateTime(g.start)} MSK ·{" "}
-            {g.url ? <a href={g.url} target="_blank">rushandball.ru</a> : <span>{g.source === "handballapi" ? "HandballAPI" : "Access-Bestandsimport"}</span>}
+            {g.url ? <a href={g.url} target="_blank">rushandball.ru</a> : <span>{SOURCE_LABEL[g.source ?? ""] ?? "Access-Bestandsimport"}</span>}
           </div>
         </div>
         <div style={{ textAlign: "right" }}>

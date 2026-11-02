@@ -74,7 +74,7 @@ export default function ImportPage() {
           <div style={{ marginTop: 6 }}>
             {auto.data.every_hours > 0 ? (
               <>
-                <b>Automatisch:</b> laufende Saisons (Russland, Korea) alle {auto.data.every_hours} Stunden
+                <b>Automatisch:</b> laufende Saisons (Russland, Korea, Rumänien) alle {auto.data.every_hours} Stunden
                 {auto.data.running ? " · läuft gerade …" : ` · zuletzt ${when(auto.data.last_run)} · nächster Lauf ${when(auto.data.next_run)}`}
                 {auto.data.message && <div className="small muted">{auto.data.message}</div>}
               </>

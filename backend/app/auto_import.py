@@ -3,6 +3,7 @@
 Läuft im Server alle ``AUTO_IMPORT_HOURS`` Stunden (0 = aus):
 * Russland (rushandball.ru): jeder Wettbewerb mit Spielen von vor drei Wochen bis in zwei Wochen.
 * Korea (koreahandball.com): die aktuelle Saison.
+* Rumänien (frhlive2.com): Liga Zimbrilor und Liga Florilor, die laufende Saison.
 Danach werden xG und Team-Werte neu berechnet. Ein laufender Import von Hand hat Vorrang.
 """
 from __future__ import annotations
@@ -17,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from . import importer, xg
 from .korea_import import import_korea
+from .romania_import import import_romania
 from .models import Competition, Game
 
 log = logging.getLogger(__name__)
@@ -53,9 +55,16 @@ def run_once(session: Session) -> str:
                      (f", {len(r['errors'])} Fehler" if r["errors"] else ""))
     korea = import_korea(session, [korea_season(datetime.now())])
     new_korea = sum(v for k, v in korea["report"].items() if k.startswith("mit Würfen"))
-    if new_korea:
-        xg.recompute_all(session)
     parts.append(f"Korea: {new_korea} neu")
+    try:
+        new_romania = import_romania(session, settle_hours=SETTLE_HOURS)["report"].get("mit Würfen", 0)
+        parts.append(f"Rumänien: {new_romania} neu")
+    except Exception as ex:  # eine ausgefallene Quelle soll die anderen nicht aufhalten
+        log.exception("Rumänien-Import fehlgeschlagen")
+        new_romania = 0
+        parts.append(f"Rumänien: Fehler ({ex})")
+    if new_korea or new_romania:
+        xg.recompute_all(session)
     return "; ".join(parts)
 
 
