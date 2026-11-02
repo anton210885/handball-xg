@@ -5,6 +5,7 @@ Läuft im Server alle ``AUTO_IMPORT_HOURS`` Stunden (0 = aus):
 * Korea (koreahandball.com): die aktuelle Saison.
 * Rumänien (frhlive2.com): Liga Zimbrilor und Liga Florilor, die laufende Saison; ältere Spiele bekommen nach und nach
   ihre Spielerstatistik aus der HandballAPI (eine Abfrage pro Spiel, 5 bleiben im Monat übrig).
+* Kroatien (HRS-Statistik): Premijer liga und 1. HRL Žene, die laufende Saison.
 Danach werden xG und Team-Werte neu berechnet. Ein laufender Import von Hand hat Vorrang.
 """
 from __future__ import annotations
@@ -19,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from . import importer, xg
 from .korea_import import import_korea
+from .croatia_import import CURRENT_SEASON as CROATIA_SEASON, import_croatia
 from .romania_import import backfill_lineups, import_romania
 from .models import Competition, Game
 
@@ -65,13 +67,20 @@ def run_once(session: Session) -> str:
         new_romania = 0
         parts.append(f"Rumänien: Fehler ({ex})")
     try:
+        new_croatia = import_croatia(session, [CROATIA_SEASON], settle_hours=SETTLE_HOURS)["report"].get("mit Würfen", 0)
+        parts.append(f"Kroatien: {new_croatia} neu")
+    except Exception as ex:
+        log.exception("Kroatien-Import fehlgeschlagen")
+        new_croatia = 0
+        parts.append(f"Kroatien: Fehler ({ex})")
+    try:
         # Spielerstatistik älterer rumänischer Spiele, solange das HandballAPI-Kontingent reicht (5 Abfragen bleiben übrig)
         lineups = backfill_lineups(session, reserve=5)
         if lineups["report"].get("geladen"):
             parts.append(f"Rumänien Spielerstatistik: {lineups['report']['geladen']} nachgeladen, {lineups['offen']} offen")
     except Exception:
         log.exception("Nachladen der Spielerstatistik fehlgeschlagen")
-    if new_korea or new_romania:
+    if new_korea or new_romania or new_croatia:
         xg.recompute_all(session)
     return "; ".join(parts)
 

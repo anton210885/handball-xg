@@ -62,6 +62,8 @@ def parse_js(text: str):
     body = re.sub(r'([{,]\s*)([A-Za-z_]\w*)\s*:', r'\1"\2":', body)  # Schlüssel ohne Anführungszeichen
     body = re.sub(r':\s*(?=[,}\]])', ': null', body)  # leere Werte
     body = re.sub(r'(:\s*)0+(\d+)(?=\s*[,}\]])', r'\1\2', body)  # Zahlen mit führender Null („06“)
+    # Einzelne Backslashes in Texten („\pdf\…“) verdoppeln; gültige Escapes paarweise unverändert lassen
+    body = re.sub(r'\\(.)', lambda m: m.group(0) if m.group(1) in '"\\/bfnrtu' else "\\\\" + m.group(1), body)
     return json.loads(body, strict=False)  # Tabulatoren in Texten
 
 

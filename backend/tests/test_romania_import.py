@@ -13,6 +13,7 @@ SCHEDULE = """var natjecanjeobjekt =
 \t\t"broj": 2068, \t"naziv": "Liga Zimbrilor 26-27", "statistika": {"mvp": 0, "mu": 06}, "lige": [
 \t\t{\t"broj": 4162, \t"naziv": "Liga Zimbrilor 26-27", \t"kb": null, "utakmice": [
 \t\t\t{\t"broj": 1, \t"e1": "CSM Constanta", \t"e2": "CS Dinamo Bucuresti", \t"pc": "2026-09-03T18:00:00", \t"br1": 5, \t"br2": 6, \t"r1": 2, \t"r2": 1, \t"p11": 1, \t"p12": 0, \t"kolo": 1, \t"st": 2}
+\t\t\t, {\t"broj": 3, \t"e1": "CSM Vaslui", \t"e2": "CSM Constanta", \t"pc": "2026-09-10T18:00:00", \t"br1": 7, \t"br2": 5, \t"r1": 10, \t"r2": 0, \t"kolo": 2, \t"st": 2}
 \t\t\t, {\t"broj": 2, \t"e1": "CSM Vaslui", \t"e2": "Unbekannt", \t"pc": "2026-12-03T18:00:00", \t"br1": 7, \t"br2": 8, \t"r1": null, \t"r2": null, \t"kolo": 9, \t"st": 0}
 \t\t]}
 \t]
@@ -47,6 +48,8 @@ class FakeClient:
 
 def test_parse_js_handles_unquoted_keys_empty_values_and_leading_zeros():
     assert frhlive.parse_js('var x = {a: 1, "b": , c: 06, "d": [1, 2]};') == {"a": 1, "b": None, "c": 6, "d": [1, 2]}
+    # Einzelne Backslashes (Dateipfade) sind in JSON ungültig, gültige Escapes bleiben
+    assert frhlive.parse_js(r'{p: "x\pdf\1.pdf", q: "a\"b"}') == {"p": r"x\pdf\1.pdf", "q": 'a"b'}
 
 
 def test_zones_and_time_zone():
@@ -76,7 +79,7 @@ def test_import_maps_teams_and_stores_shots_only_when_goals_match(monkeypatch):
     Base.metadata.create_all(engine)
     with Session(engine) as s:
         result = romania_import.import_romania(s, FakeClient())
-        assert result["report"] == {"neu angelegt": 1, "unbekanntes Team": 1, "Würfe nicht übernommen": 1}
+        assert result["report"] == {"neu angelegt": 1, "unbekanntes Team": 1, "Würfe nicht übernommen": 1, "kampflos (übersprungen)": 1}
         g = s.scalars(select(Game)).one()
         assert (g.home_team.name, g.away_team.name, g.home_ht, g.stage_type) == ("CSM Constanta", "Din. Bucuresti", 1, "league")
         assert s.get(Competition, g.competition_id).season == "26/27"
@@ -158,3 +161,10 @@ def test_lineups_are_backfilled_newest_first_and_keep_a_reserve(tmp_path, monkey
         later = Client()
         assert romania_import.backfill_lineups(s, later, reserve=5)["report"] == {} and later.calls == []
     engine.dispose()
+
+
+def test_croatian_groups_get_stage_types():
+    from app.croatia_import import stage_of
+    assert stage_of("Liga A")[1] == stage_of("Liga za prvaka")[1] == stage_of("1. HRL Žene")[1] == "league"
+    assert stage_of("Liga za ostanak")[1] == stage_of("Kvalifikacije za Premijer ligu")[1] == "placement"
+    assert stage_of("Doigravanje za prvaka")[1] == stage_of("Doigravanje za Europu")[1] == "knockout"

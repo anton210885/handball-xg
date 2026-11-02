@@ -61,16 +61,83 @@ def stage_of(group: str, competition_name: str) -> tuple[str, str | None]:
     return group, None
 
 
-def _find_existing(session: Session, comp_id: int, home: int, away: int, start: datetime, game_id: int) -> Game | None:
-    rec = session.get(SourceRecord, f"frhlive:{game_id}")
+def _find_existing(session: Session, source: str, comp_id: int, home: int, away: int, start: datetime,
+                   game_id: int) -> tuple[Game | None, bool]:
+    """Schon verknüpftes Spiel, sonst ein noch nicht verknüpftes mit gleichen Teams (±2 Tage, auch vertauscht)."""
+    rec = session.get(SourceRecord, f"{source}:{game_id}")
     if rec and rec.game_id and session.get(Game, rec.game_id):
-        return session.get(Game, rec.game_id)
-    taken = {r.game_id for r in session.scalars(select(SourceRecord).where(SourceRecord.key.like("frhlive:%"))) if r.game_id}
-    hits = [g for g in session.scalars(select(Game).where(
-        Game.competition_id == comp_id, Game.home_team_id == home, Game.away_team_id == away,
+        return session.get(Game, rec.game_id), False
+    taken = {r.game_id for r in session.scalars(select(SourceRecord).where(SourceRecord.key.like(f"{source}:%"))) if r.game_id}
+    candidates = [g for g in session.scalars(select(Game).where(
+        Game.competition_id == comp_id,
         Game.start_moscow >= start - timedelta(days=2), Game.start_moscow <= start + timedelta(days=2),
     )).unique().all() if g.id not in taken]
-    return min(hits, key=lambda g: abs(g.start_moscow - start)) if hits else None
+    for swapped in (False, True):
+        h, a = (away, home) if swapped else (home, away)
+        hits = [g for g in candidates if (g.home_team_id, g.away_team_id) == (h, a)]
+        if hits:
+            return min(hits, key=lambda g: abs(g.start_moscow - start)), swapped
+    return None, False
+
+
+def import_schedule(session: Session, client: frhlive.FrhLiveClient, competition: int, *, source: str, country: str,
+                    league: str, gender: str, season: str, team_names: dict[str, str], stage, latest: datetime,
+                    report: Counter, problems: list[str]) -> None:
+    """Einen Wettbewerb der sportinfocentar-Daten übernehmen: Spiele anlegen oder ergänzen, Würfe beendeter Spiele.
+    ``source`` (z. B. „frhlive“, „hrs“) bildet die Schlüssel der Quelldaten und die IDs neuer Spiele und Würfe.
+    ``stage(gruppe)`` liefert (Spielphase, Typ)."""
+    from .korea_import import _swap_orientation
+    comp = canonical_competition(session, country, league, gender, season, source)
+    for sg in client.schedule(competition):
+        if sg.start_moscow is None:
+            continue
+        if sg.home not in team_names or sg.away not in team_names:
+            problems.append(f"Unbekanntes Team: {sg.home} – {sg.away} ({sg.start_moscow:%d.%m.%Y})")
+            report["unbekanntes Team"] += 1
+            continue
+        if sg.finished and {sg.home_score, sg.away_score} == {10, 0}:
+            report["kampflos (übersprungen)"] += 1  # am grünen Tisch gewertet, nicht gespielt
+            continue
+        home = canonical_team(session, country, gender, team_names[sg.home], "access").id
+        away = canonical_team(session, country, gender, team_names[sg.away], "access").id
+        game, swapped = _find_existing(session, source, comp.id, home, away, sg.start_moscow, sg.game_id)
+        if game is None:
+            gid = stable_id("game", source, sg.game_id)
+            game = session.get(Game, gid) or Game(id=gid, competition_id=comp.id, source=source)
+            report["neu angelegt"] += 1
+        elif not game.external_id:
+            if swapped:
+                _swap_orientation(game)
+                report["Heim/Gast korrigiert"] += 1
+            report["zusammengeführt"] += 1
+        game.competition_id, game.home_team_id, game.away_team_id = comp.id, home, away
+        game.start_moscow, game.date_quality = sg.start_moscow, "exact"
+        game.game_number, game.external_id = (str(sg.round) if sg.round else None), str(sg.game_id)
+        game.finished = sg.finished
+        game.home_score, game.away_score = sg.home_score, sg.away_score
+        game.home_ht, game.away_ht = sg.home_ht, sg.away_ht
+        game.stage, game.stage_type = stage(sg.league)
+        session.add(game)
+        session.flush()
+        session.merge(SourceRecord(key=f"{source}:{sg.game_id}", game_id=game.id, status="imported",
+                                   payload={"game": sg.game_id, "competition": competition, "group": sg.league}))
+
+        if game.finished and not game.shots_imported and sg.start_moscow <= latest:
+            try:
+                match = frhlive.parse_match(client.match(sg.game_id), sg.game_id)
+            except ValueError as ex:  # unlesbare Spieldatei: im Bericht nennen, den Rest weiter importieren
+                problems.append(f"{sg.start_moscow:%d.%m.%Y} {sg.home} – {sg.away}: Spieldatei nicht lesbar ({ex})")
+                report["Würfe nicht übernommen"] += 1
+                session.commit()
+                continue
+            issues = frhlive.validate(match, sg.home_score, sg.away_score)
+            if match.shots and not issues:
+                _store_shots(session, game, match, source)
+                report["mit Würfen"] += 1
+            else:
+                problems.append(f"{sg.start_moscow:%d.%m.%Y} {sg.home} – {sg.away}: " + ("; ".join(issues) or "kein Spielverlauf"))
+                report["Würfe nicht übernommen"] += 1
+        session.commit()
 
 
 def import_romania(session: Session, client: frhlive.FrhLiveClient | None = None, settle_hours: float = 0) -> dict:
@@ -79,61 +146,24 @@ def import_romania(session: Session, client: frhlive.FrhLiveClient | None = None
     report: Counter = Counter()
     problems: list[str] = []
     latest = datetime.utcnow() + timedelta(hours=3) - timedelta(hours=settle_hours)
-
     for comp_info in client.competitions():
         gender = next((g for prefix, g in LEAGUES.items() if comp_info["naziv"].startswith(prefix)), None)
         season = season_of(comp_info["naziv"])
         if gender is None or season is None:
             continue
-        comp = canonical_competition(session, COUNTRY, LEAGUE, gender, season, "frhlive")
-        names = TEAM_NAMES[gender]
-        for sg in client.schedule(comp_info["broj"]):
-            if sg.start_moscow is None:
-                continue
-            if sg.home not in names or sg.away not in names:
-                problems.append(f"Unbekanntes Team: {sg.home} – {sg.away} ({sg.start_moscow:%d.%m.%Y})")
-                report["unbekanntes Team"] += 1
-                continue
-            home = canonical_team(session, COUNTRY, gender, names[sg.home], "access").id
-            away = canonical_team(session, COUNTRY, gender, names[sg.away], "access").id
-            game = _find_existing(session, comp.id, home, away, sg.start_moscow, sg.game_id)
-            if game is None:
-                gid = stable_id("game", "frhlive", sg.game_id)
-                game = session.get(Game, gid) or Game(id=gid, competition_id=comp.id, source="frhlive")
-                report["neu angelegt"] += 1
-            game.competition_id, game.home_team_id, game.away_team_id = comp.id, home, away
-            game.start_moscow, game.date_quality = sg.start_moscow, "exact"
-            game.game_number, game.external_id = (str(sg.round) if sg.round else None), str(sg.game_id)
-            game.finished = sg.finished
-            game.home_score, game.away_score = sg.home_score, sg.away_score
-            game.home_ht, game.away_ht = sg.home_ht, sg.away_ht
-            game.stage, game.stage_type = stage_of(sg.league, comp_info["naziv"])
-            session.add(game)
-            session.flush()
-            session.merge(SourceRecord(key=f"frhlive:{sg.game_id}", game_id=game.id, status="imported",
-                                       payload={"game": sg.game_id, "competition": comp_info["broj"], "group": sg.league}))
-
-            if game.finished and not game.shots_imported and sg.start_moscow <= latest:
-                match = frhlive.parse_match(client.match(sg.game_id), sg.game_id)
-                issues = frhlive.validate(match, sg.home_score, sg.away_score)
-                if match.shots and not issues:
-                    _store_shots(session, game, match)
-                    report["mit Würfen"] += 1
-                else:
-                    problems.append(f"{sg.start_moscow:%d.%m.%Y} {sg.home} – {sg.away}: " + ("; ".join(issues) or "kein Spielverlauf"))
-                    report["Würfe nicht übernommen"] += 1
-            session.commit()
-
+        import_schedule(session, client, comp_info["broj"], source="frhlive", country=COUNTRY, league=LEAGUE, gender=gender,
+                        season=season, team_names=TEAM_NAMES[gender], stage=lambda g, n=comp_info["naziv"]: stage_of(g, n),
+                        latest=latest, report=report, problems=problems)
     link_priors(session)
     session.commit()
     return {"report": dict(report), "problems": problems, "pages_fetched": client.fetched}
 
 
-def _store_shots(session: Session, game: Game, match: frhlive.FrhMatch):
+def _store_shots(session: Session, game: Game, match: frhlive.FrhMatch, source: str = "frhlive"):
     session.execute(delete(Shot).where(Shot.game_id == game.id))
     for i, s in enumerate(match.shots):
         session.add(Shot(
-            id=stable_id("shot", "frhlive", f"{match.game_id}|{i}"), game_id=game.id,
+            id=stable_id("shot", source, f"{match.game_id}|{i}"), game_id=game.id,
             team_id=game.home_team_id if s.is_home else game.away_team_id, is_home=s.is_home,
             period=s.period, minute=s.minute, shooter_name=s.shooter, goalkeeper_name=s.goalkeeper,
             outcome=s.outcome, court_zone=s.zone, goal_zone=s.goal_zone, attack_type=s.attack_type, assisted=s.assisted,

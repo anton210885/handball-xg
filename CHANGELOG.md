@@ -2,6 +2,11 @@
 
 Die Versionsnummer steht in `backend/app/__init__.py` und `frontend/package.json` (ein Test prüft, dass beide gleich sind). Sie wird im Seitenmenü und unter `/api/version` angezeigt.
 
+## 0.11.0 – 2026-11-03
+- **Kroatien** (Paket24 Premijer liga, 1. HRL Žene) aus der Statistik des Verbands HRS: 24/25, 25/26 und die laufende Saison 26/27 mit jedem Wurf (1.042 Spiele, 951 mit Würfen). Die Wettbewerbsnummern stammen aus dem HRS-Archiv (https://hrs.hr/povijesna-natjecanja/). Damit ist auch die Rückrunde 25/26 da, die in Access fehlte. 12 doppelte Access-Spiele mit den HRS-Spielen zusammengeführt (Linien bleiben), 12 kampflos gewertete 10:0-Spiele werden übersprungen. Im automatischen Import enthalten; von Hand `scripts\import_croatia.py`.
+- Rumänien und Kroatien nutzen denselben Import (`import_schedule`); vorhandene Spiele werden auch mit vertauschtem Heim/Gast erkannt.
+- Parser für sportinfocentar-Dateien verträgt einzelne Backslashes; eine unlesbare Spieldatei bricht den Import nicht mehr ab.
+
 ## 0.10.2 – 2026-11-02
 - **Rumänien: Spielerstatistik für ältere Spiele** aus der HandballAPI (Würfe und Tore je Spieler und Zone, Paraden): die neuesten 33 Spiele der Rückrunde 25/26 sind geladen (24 mit Daten, alle mit passender Torzahl; für 9 hat der Anbieter keine). Der Rest kommt im automatischen Import nach und nach, solange mehr als 5 Abfragen im Monat übrig sind (`backfill_lineups`); der letzte bekannte Stand des Kontingents wird gemerkt.
 

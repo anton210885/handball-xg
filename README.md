@@ -18,7 +18,7 @@ Die Webseite holt ihre Daten aus einer JSON-Schnittstelle:
 
 Die Rohdaten werden unter `backend/data/raw/` zwischengespeichert. Ein erneuter Import lädt sie also nicht noch einmal.
 
-**Automatisch:** Der Server lädt alle 6 Stunden (`AUTO_IMPORT_HOURS`, 0 = aus) die laufenden Saisons nach – Russland (jeder rushandball-Wettbewerb mit Spielen von vor drei Wochen bis in zwei Wochen), die aktuelle koreanische Saison und die rumänischen Ligen. Neu beendete Spiele bekommen ihre Würfe frühestens 3 Stunden nach Anpfiff, danach werden xG und Team-Werte neu berechnet. Stand und nächster Lauf stehen auf „Daten-Import“.
+**Automatisch:** Der Server lädt alle 6 Stunden (`AUTO_IMPORT_HOURS`, 0 = aus) die laufenden Saisons nach – Russland (jeder rushandball-Wettbewerb mit Spielen von vor drei Wochen bis in zwei Wochen), die aktuelle koreanische Saison sowie die rumänischen und kroatischen Ligen. Neu beendete Spiele bekommen ihre Würfe frühestens 3 Stunden nach Anpfiff, danach werden xG und Team-Werte neu berechnet. Stand und nächster Lauf stehen auf „Daten-Import“.
 
 ### xG-Modell (`backend/app/xg.py`)
 Die Torquote wird pro **Feldzone × Angriffsart** (Positionsangriff / Umschalten) aus allen Würfen geschätzt. Seltene Kombinationen werden zur Zonenquote hin geglättet: `(Tore + k·Zonenquote) / (Würfe + k)`. Ein 7-m-Wurf hat eine eigene Quote.
@@ -89,6 +89,13 @@ Die Analyse bietet Home, Draw, Away, Over und Under, Quotenfilter Min/Max sowie 
 Pearson-Korrelationen zeigen den Zusammenhang zwischen jeder verfügbaren numerischen Metrik und Nettoertrag je Wette. Sortiert wird numerisch nach dem Korrelationswert absteigend (positiv bis negativ); konstante Metriken bleiben ohne Korrelation. Ältere ca. 70 % der Spieldaten bestimmen bis zu fünf Wertebereiche je Metrik; neuere Daten prüfen dieselben Grenzen. Gleiche Tage werden nicht getrennt, fehlende Werte ausgewiesen. Grafiken und Tabellen zeigen Profit, ROI und Anzahl Wetten je Bereich und Zeitraum. Korrelation belegt keine Ursache; die xG-Merkmale werden für jedes historische Spiel mit früheren Lerndaten berechnet.
 
 Zusätzlich sind Home-Quote Min/Max und Away-Quote Min/Max unabhängig vom gewählten Wettmarkt optional einstellbar. Jede Grenze kann einzeln gesetzt werden. Weitere Metrikbedingungen (Merkmal, Vergleich, Wert) und Formeln lassen sich wie im Strategie-Baukasten ergänzen und entfernen. Alle gesetzten Filter werden mit UND vor Profitberechnung, zeitlicher Aufteilung und Korrelationsanalyse angewendet. Fehlende Quoten/Metriken schließen ein Spiel nur dann aus, wenn die jeweilige zusätzliche Bedingung sie benötigt.
+
+### Kroatien (Premijer liga, 1. HRL Žene, hrs.hr)
+`scripts\import_croatia.py` (optional mit Saison, z. B. `26/27`) lädt ab 24/25 die Statistik des kroatischen Verbands – derselbe Anbieter wie in Rumänien (sportinfocentar2.com), mit Spielplan, Ergebnis, Halbzeit und **jedem Wurf** aus dem Spielverlauf.
+
+- Die Wettbewerbsnummern je Saison stehen im Archiv des Verbands (https://hrs.hr/povijesna-natjecanja/, „ID natjecanja“) und in `COMPETITIONS` in `app/croatia_import.py`; eine neue Saison wird dort eingetragen (ältere ab 2019/20 wären ebenso verfügbar).
+- Wettbewerbe und Teams wie im Access-Bestand („Croatia · Premijer liga“, „Croatia · HRL“); vorhandene Access-Spiele werden ergänzt (Heim/Gast notfalls korrigiert), ihre Linien bleiben.
+- Spielphasen: Liga A/B und Meisterrunde = Hauptrunde, Abstiegsrunde und Relegation = Platzierungsrunde, Finale und Europa-Playoff = KO-Spiel.
 
 ### Rumänien (Liga Zimbrilor, Liga Florilor, frhlive2.com)
 `scripts\import_romania.py` lädt die laufende Saison von frhlive2.com, der Live-Statistik des rumänischen Verbands (Daten von sportinfocentar2.com): Spielplan, Ergebnis, Halbzeit und aus jedem beendeten Spiel den **Spielverlauf mit jedem Wurf** – Zone (Außen und Rückraum mit Seite, Kreis, 7 m, Gegenstoß, Durchbruch, leeres Tor), Ergebnis, Torzone, Werfer, Torwart und Vorlage.
