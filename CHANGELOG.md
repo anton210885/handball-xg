@@ -2,6 +2,9 @@
 
 Die Versionsnummer steht in `backend/app/__init__.py` und `frontend/package.json` (ein Test prüft, dass beide gleich sind). Sie wird im Seitenmenü und unter `/api/version` angezeigt.
 
+## 0.10.2 – 2026-11-02
+- **Rumänien: Spielerstatistik für ältere Spiele** aus der HandballAPI (Würfe und Tore je Spieler und Zone, Paraden): die neuesten 33 Spiele der Rückrunde 25/26 sind geladen (24 mit Daten, alle mit passender Torzahl; für 9 hat der Anbieter keine). Der Rest kommt im automatischen Import nach und nach, solange mehr als 5 Abfragen im Monat übrig sind (`backfill_lineups`); der letzte bekannte Stand des Kontingents wird gemerkt.
+
 ## 0.10.1 – 2026-11-02
 - **Rumänien 25/26 vervollständigt**: Access endete im Dezember 2025; die Ergebnisse von Januar bis Mai 2026 kommen jetzt aus der HandballAPI (Männer 62, Frauen 78 Spiele, mit Halbzeit, ohne Würfe), dazu Halbzeitstände für 111 Access-Spiele. Zwei doppelte Access-Spiele zusammengeführt. `scripts\import_romania_history.py` liest die gespeicherten Antworten unter `data/handballapi/ro_events_*`.
 

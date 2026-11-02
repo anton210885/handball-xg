@@ -212,3 +212,54 @@ def import_handballapi_results(session: Session, events: list[dict], gender: str
     link_priors(session)
     session.commit()
     return {"report": dict(report), "problems": problems}
+
+
+def backfill_lineups(session: Session, client=None, reserve: int = 5, limit: int | None = None) -> dict:
+    """Spielerstatistik (Würfe und Tore je Zone, Paraden) für rumänische Spiele aus der HandballAPI nachladen,
+    die neuesten zuerst. Eine Abfrage pro Spiel; es bleiben mindestens ``reserve`` Abfragen im Monat übrig.
+    Antworten werden unter data/handballapi/lineups_<event>.json gespeichert und nie zweimal abgefragt."""
+    import json
+    from .config import DATA_DIR
+    from .models import ApiUsage, Competition
+    from .sources.handballapi import HandballApiClient, QuotaError
+    from .unified_import import import_lineups
+
+    cache = DATA_DIR / "handballapi"
+    # Letzter bekannter Rest des Kontingents in diesem Monat – sonst kostet jeder Lauf eine Abfrage, nur um ihn zu erfahren
+    month = datetime.utcnow().strftime("%Y-%m")
+    known = session.get(ApiUsage, ("handballapi_remaining", month))
+    games = session.scalars(select(Game).join(Competition, Game.competition_id == Competition.id).where(
+        Competition.country == COUNTRY, Game.finished.is_(True), Game.shots_imported.is_(False),
+        Game.handballapi_event_id.is_not(None), Game.stats_imported.is_not(True),
+    ).order_by(Game.start_moscow.desc())).unique().all()
+    report: Counter = Counter()
+    for g in games:
+        if limit is not None and report["geladen"] >= limit:
+            break
+        f = cache / f"lineups_{g.handballapi_event_id}.json"
+        if f.exists():
+            data = json.loads(f.read_text(encoding="utf-8"))
+            report["aus Zwischenspeicher"] += 1
+        else:
+            client = client or HandballApiClient()
+            left = client.remaining if client.remaining is not None else (known.calls if known else None)
+            if left is not None and left <= reserve:
+                break
+            try:
+                data = client._get(f"match/{g.handballapi_event_id}/lineups") or {}
+            except QuotaError:
+                client.remaining = 0
+                break
+            f.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            report["geladen"] += 1
+        if not (data.get("home") or {}).get("players"):
+            report["ohne Spielerdaten"] += 1
+        import_lineups(session, g, data)
+        session.commit()
+    if client is not None and client.remaining is not None:
+        known = known or ApiUsage(provider="handballapi_remaining", month=month, calls=0)
+        known.calls = client.remaining
+        session.add(known)
+        session.commit()
+    remaining = sum(1 for g in games if not g.stats_imported)
+    return {"report": dict(report), "offen": remaining, "abfragen_übrig": client.remaining if client else None}

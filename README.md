@@ -96,7 +96,7 @@ Zusätzlich sind Home-Quote Min/Max und Away-Quote Min/Max unabhängig vom gewä
 - Wettbewerbe und Teams wie im Access-Bestand („Romania · Liga nationala“, frhlive-Namen → Access-Namen in `TEAM_NAMES`), damit Vorsaison und Teamwerte durchgehen. Unbekannte Teams stehen im Bericht.
 - Würfe nur, wenn die Tore im Spielverlauf genau zum Ergebnis passen und die Wurfzahl höchstens um 2 von der Spielertabelle abweicht.
 - Ältere Saisons bietet die Quelle nicht an. Abrufe mit 1,5 s Pause, Spieldateien unter `data/raw/frhlive/` zwischengespeichert.
-- Die Rückrunde 25/26 (Januar bis Mai 2026, in Access nicht mehr enthalten) stammt aus der HandballAPI: nur Ergebnisse und Halbzeit, ohne Würfe (`scripts\import_romania_history.py`, liest gespeicherte Antworten, ruft keine API auf).
+- Die Rückrunde 25/26 (Januar bis Mai 2026, in Access nicht mehr enthalten) stammt aus der HandballAPI: nur Ergebnisse und Halbzeit, ohne Würfe (`scripts\import_romania_history.py`, liest gespeicherte Antworten, ruft keine API auf). Ihre Spielerstatistik (Würfe und Tore je Zone, Paraden) lädt der automatische Import nach und nach aus der HandballAPI, eine Abfrage pro Spiel, die neuesten zuerst; 5 Abfragen im Monat bleiben frei.
 
 ### Korea (H-Liga, koreahandball.com)
 `scripts\import_korea.py` (optional mit Saison, z. B. `2026` = 26/27) lädt ab 24/25 Männer und Frauen von koreahandball.com: Spielplan (Hauptrunde und Playoffs) und aus jedem Spielbericht den **Spielverlauf mit jedem Wurf** – Zone (6 m, Außen, 9 m, 7 m, Gegenstoß, Durchbruch, leeres Tor), Ergebnis (Tor, gehalten, vorbei, Pfosten, Block), Werfer, Torwart und Vorlage. Der Werfer wird über den Kader dem Team zugeordnet (geblockte Würfe stehen im Verlauf teils beim Gegner).

@@ -116,3 +116,45 @@ def test_handballapi_results_fill_only_missing_games():
         assert (new.home_team_id, new.home_score, new.away_score, new.home_ht, new.game_number) == (a.id, 35, 25, 10, "14")
         assert s.get(Game, 1).home_ht == 10
     engine.dispose()
+
+
+def test_lineups_are_backfilled_newest_first_and_keep_a_reserve(tmp_path, monkeypatch):
+    from app import config
+    from app.models import AggregateStat, ApiUsage
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    (tmp_path / "handballapi").mkdir()
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    class Client:
+        remaining = None
+
+        def __init__(self):
+            self.calls = []
+
+        def _get(self, path):
+            self.calls.append(path)
+            self.remaining = 7 - len(self.calls)
+            players = lambda goals: {"players": [{"player": {"name": "X"}, "position": "LB", "statistics": {"shotsTaken": goals + 3, "goals": goals}}]}
+            return {"home": players(30), "away": players(28)}
+
+    with Session(engine) as s:
+        comp = romania_import.canonical_competition(s, "Romania", "Liga nationala", "men", "25/26", "handballapi")
+        a = romania_import.canonical_team(s, "Romania", "men", "Cluj", "access")
+        b = romania_import.canonical_team(s, "Romania", "men", "Vaslui", "access")
+        for i in range(4):
+            s.add(Game(id=i + 1, competition_id=comp.id, home_team_id=a.id, away_team_id=b.id, start_moscow=datetime(2026, 3, 1 + i),
+                       home_score=30, away_score=28, finished=True, handballapi_event_id=100 + i))
+        s.commit()
+        client = Client()
+        result = romania_import.backfill_lineups(s, client, reserve=5)
+        # 7 frei, 5 bleiben übrig: zwei Abfragen, die neuesten Spiele zuerst
+        assert client.calls == ["match/103/lineups", "match/102/lineups"]
+        assert result["report"] == {"geladen": 2} and result["offen"] == 2
+        stat = s.get(AggregateStat, (4, True))
+        assert (stat.shots, stat.goals) == (33, 30) and s.get(Game, 4).stats_imported
+        assert s.get(ApiUsage, ("handballapi_remaining", datetime.utcnow().strftime("%Y-%m"))).calls == 5
+        # Nächster Lauf im selben Monat fragt gar nicht erst
+        later = Client()
+        assert romania_import.backfill_lineups(s, later, reserve=5)["report"] == {} and later.calls == []
+    engine.dispose()

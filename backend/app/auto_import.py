@@ -3,7 +3,8 @@
 Läuft im Server alle ``AUTO_IMPORT_HOURS`` Stunden (0 = aus):
 * Russland (rushandball.ru): jeder Wettbewerb mit Spielen von vor drei Wochen bis in zwei Wochen.
 * Korea (koreahandball.com): die aktuelle Saison.
-* Rumänien (frhlive2.com): Liga Zimbrilor und Liga Florilor, die laufende Saison.
+* Rumänien (frhlive2.com): Liga Zimbrilor und Liga Florilor, die laufende Saison; ältere Spiele bekommen nach und nach
+  ihre Spielerstatistik aus der HandballAPI (eine Abfrage pro Spiel, 5 bleiben im Monat übrig).
 Danach werden xG und Team-Werte neu berechnet. Ein laufender Import von Hand hat Vorrang.
 """
 from __future__ import annotations
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from . import importer, xg
 from .korea_import import import_korea
-from .romania_import import import_romania
+from .romania_import import backfill_lineups, import_romania
 from .models import Competition, Game
 
 log = logging.getLogger(__name__)
@@ -63,6 +64,13 @@ def run_once(session: Session) -> str:
         log.exception("Rumänien-Import fehlgeschlagen")
         new_romania = 0
         parts.append(f"Rumänien: Fehler ({ex})")
+    try:
+        # Spielerstatistik älterer rumänischer Spiele, solange das HandballAPI-Kontingent reicht (5 Abfragen bleiben übrig)
+        lineups = backfill_lineups(session, reserve=5)
+        if lineups["report"].get("geladen"):
+            parts.append(f"Rumänien Spielerstatistik: {lineups['report']['geladen']} nachgeladen, {lineups['offen']} offen")
+    except Exception:
+        log.exception("Nachladen der Spielerstatistik fehlgeschlagen")
     if new_korea or new_romania:
         xg.recompute_all(session)
     return "; ".join(parts)
