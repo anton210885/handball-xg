@@ -160,7 +160,7 @@ def oddspapi_run(competition_id: int | None = None, session: Session = Depends(g
 
 @app.get("/api/coverage")
 def line_coverage(session: Session = Depends(get_session)):
-    """Wie viele Spiele je Wettbewerb ohne Torlinie, 1X2-Quoten oder Handicap sind.
+    """Wie viele Spiele je Wettbewerb ohne Torlinie, 1X2-Quoten oder Handicap sind und wie viele Würfe haben.
 
     Die Over/Under-Quote wird nicht gezählt: Dort steht vielfach nur der Platzhalter 1,80.
     """
@@ -171,7 +171,7 @@ def line_coverage(session: Session = Depends(get_session)):
         key, _ = league_key(c)
         country, league = key if isinstance(key, tuple) else (c.country, key)
         row = {"id": c.id, "country": country, "league": league, "gender": c.gender, "season": c.season,
-               "finished": 0, "open": 0}
+               "finished": 0, "open": 0, "finished_shots": 0, "finished_stats_only": 0, "finished_no_xg": 0}
         for status in ("finished", "open"):
             row.update({f"{status}_no_line": 0, f"{status}_no_1x2": 0, f"{status}_no_hdp": 0})
         for g in session.scalars(select(Game).where(Game.competition_id == c.id)).unique():
@@ -181,6 +181,10 @@ def line_coverage(session: Session = Depends(get_session)):
             row[f"{status}_no_line"] += not (line and line.over_line is not None)
             row[f"{status}_no_1x2"] += not (line and line.odds_home and line.odds_away)
             row[f"{status}_no_hdp"] += not (line and line.hdp_line is not None)
+            if g.finished:  # xG-Grundlage: jeder Wurf, nur Wurfzahlen je Spieler/Zone oder gar nichts
+                row["finished_shots"] += bool(g.shots_imported)
+                row["finished_stats_only"] += bool(g.stats_imported and not g.shots_imported)
+                row["finished_no_xg"] += not (g.shots_imported or g.stats_imported)
         out.append(row)
     return sorted(out, key=lambda r: (r["country"] or "", r["league"] or "", r["gender"] or "", r["season"] or ""))
 

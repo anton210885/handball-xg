@@ -2,6 +2,13 @@
 
 Die Versionsnummer steht in `backend/app/__init__.py` und `frontend/package.json` (ein Test prüft, dass beide gleich sind). Sie wird im Seitenmenü und unter `/api/version` angezeigt.
 
+## 0.12.0 – 2026-11-05
+- **Rumänien 24/25 und 25/26 mit jedem Wurf** von frhlive (`scripts\import_romania_archive.py`): Die Wettbewerbsnummern der abgeschlossenen Saisons stammen aus der öffentlichen Wettbewerbsliste, wie sie das Internet Archive gespeichert hat. Vorhandene Access- und HandballAPI-Spiele werden ergänzt: 593 Spiele, 585 mit jedem Wurf (7 ohne, weil die Wurfzahl stärker von der Spielertabelle abweicht). 21 falsche Access-Ergebnisse korrigiert (z. B. viermal 21:39 am 03.05.2025), stichprobenweise mit der HandballAPI bestätigt; 28 Spiele fehlten in Access.
+- Fehlt bei frhlive das Ergebnis eines Spiels, das eine andere Quelle schon als beendet kennt, bleibt das Ergebnis stehen (Bistrita – Rapid, 12.03.2026).
+- Beim Zusammenführen mit einem Access- oder HandballAPI-Spiel mit vertauschtem Heim/Gast werden jetzt auch die Spielerstatistik gedreht und die Spiel-ID der anderen Quelle behalten (vorher wurde die Ausrichtung bei Access-Spielen nie korrigiert).
+- **Daten-Import: Tabelle „Würfe pro Saison“** je Land, Liga, Geschlecht und Saison: beendete Spiele mit jedem Wurf, nur mit Spielerstatistik und ohne xG (`/api/coverage` liefert die Zahlen mit).
+- Bereinigt: 5 doppelte rumänische Access-Spiele 24/25 (teils mit Männer-/Frauen-Team vertauscht) zusammengeführt; bei einem kroatischen Access-Spiel (Brod – Podravka, 09.09.2025) Quoten und Handicap auf die richtige Seite gedreht.
+
 ## 0.11.0 – 2026-11-03
 - **Kroatien** (Paket24 Premijer liga, 1. HRL Žene) aus der Statistik des Verbands HRS: 24/25, 25/26 und die laufende Saison 26/27 mit jedem Wurf (1.042 Spiele, 951 mit Würfen). Die Wettbewerbsnummern stammen aus dem HRS-Archiv (https://hrs.hr/povijesna-natjecanja/). Damit ist auch die Rückrunde 25/26 da, die in Access fehlte. 12 doppelte Access-Spiele mit den HRS-Spielen zusammengeführt (Linien bleiben), 12 kampflos gewertete 10:0-Spiele werden übersprungen. Im automatischen Import enthalten; von Hand `scripts\import_croatia.py`.
 - Rumänien und Kroatien nutzen denselben Import (`import_schedule`); vorhandene Spiele werden auch mit vertauschtem Heim/Gast erkannt.

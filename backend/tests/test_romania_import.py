@@ -168,3 +168,49 @@ def test_croatian_groups_get_stage_types():
     assert stage_of("Liga A")[1] == stage_of("Liga za prvaka")[1] == stage_of("1. HRL Žene")[1] == "league"
     assert stage_of("Liga za ostanak")[1] == stage_of("Kvalifikacije za Premijer ligu")[1] == "placement"
     assert stage_of("Doigravanje za prvaka")[1] == stage_of("Doigravanje za Europu")[1] == "knockout"
+
+
+def test_merging_a_swapped_existing_game_turns_aggregates_and_keeps_its_id():
+    from app.models import AggregateStat
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as s:
+        comp = romania_import.canonical_competition(s, "Romania", "Liga nationala", "men", "26/27", "access")
+        a = romania_import.canonical_team(s, "Romania", "men", "CSM Constanta", "access")
+        b = romania_import.canonical_team(s, "Romania", "men", "Din. Bucuresti", "access")
+        # Access hat Heim und Gast vertauscht
+        s.add(Game(id=7, competition_id=comp.id, home_team_id=b.id, away_team_id=a.id, start_moscow=datetime(2026, 9, 3),
+                   home_score=1, away_score=2, finished=True, source="access", external_id="row-7", stats_imported=True))
+        s.add(AggregateStat(game_id=7, is_home=True, shots=40, goals=1, source="access"))
+        s.add(AggregateStat(game_id=7, is_home=False, shots=50, goals=2, source="access"))
+        s.commit()
+        report = romania_import.import_romania(s, FakeClient())["report"]
+        assert report["zusammengeführt"] == 1 and report["Heim/Gast korrigiert"] == 1
+        g = s.get(Game, 7)
+        assert (g.home_team_id, g.home_score, g.external_id) == (a.id, 2, "row-7")
+        assert (s.get(AggregateStat, (7, True)).shots, s.get(AggregateStat, (7, False)).shots) == (50, 40)
+    engine.dispose()
+
+
+def test_missing_result_at_the_source_keeps_a_known_result():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as s:
+        comp = romania_import.canonical_competition(s, "Romania", "Liga nationala", "men", "26/27", "access")
+        a = romania_import.canonical_team(s, "Romania", "men", "Vaslui", "access")
+        b = romania_import.canonical_team(s, "Romania", "men", "CSM Constanta", "access")
+        # Spielplan: CSM Vaslui – CSM Constanta am 10.09. 10:0 (kampflos, übersprungen); hier ohne Ergebnis
+        s.add(Game(id=8, competition_id=comp.id, home_team_id=a.id, away_team_id=b.id, start_moscow=datetime(2026, 9, 10, 18),
+                   home_score=29, away_score=26, finished=True, source="handballapi", external_id="99"))
+        s.commit()
+        sched = SCHEDULE.replace('"r1": 10, 	"r2": 0, 	"kolo": 2, 	"st": 2', '"r1": null, 	"r2": null, 	"kolo": 2, 	"st": 0')
+        assert sched != SCHEDULE
+
+        class Client(FakeClient):
+            def schedule(self, competition):
+                return frhlive.parse_schedule(sched)
+
+        romania_import.import_romania(s, Client())
+        g = s.get(Game, 8)
+        assert (g.finished, g.home_score, g.away_score, g.external_id) == (True, 29, 26, "99")
+    engine.dispose()

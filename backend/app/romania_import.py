@@ -1,7 +1,7 @@
 """Rumänische Ligen (Liga Zimbrilor, Liga Florilor) von frhlive2.com importieren.
 
 * Wettbewerbe: dieselben wie aus dem Access-Import („Romania · Liga nationala“, je Saison und Geschlecht).
-  Welche Saison läuft, steht in der Wettbewerbsliste des Verbands; ältere Saisons bietet die Quelle nicht an.
+  Welche Saison läuft, steht in der Wettbewerbsliste des Verbands; abgeschlossene Saisons über ihre Nummer (ARCHIVE).
 * Teams: frhlive-Name -> Name aus dem Access-Bestand (TEAM_NAMES), damit Vorsaison und Teamwerte durchgehen.
 * Spiele: Anstoß, Ergebnis, Halbzeit; bereits vorhandenes Spiel (gleiche Teams, ±2 Tage) wird ergänzt.
 * Würfe: jeder Wurf aus dem Spielverlauf, nur wenn die Tore genau zum Ergebnis passen.
@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from .models import Game, Shot, SourceRecord
+from .models import AggregateStat, Game, Shot, SourceRecord
 from .sources import frhlive
 from .unified_import import competition as canonical_competition
 from .unified_import import link_priors, stable_id
@@ -41,6 +41,14 @@ TEAM_NAMES = {
               "HC Zalau": "Zalau W", "SCM Ramnicu Valcea": "Ramnicu Valcea W", "SCM Universitatea Craiova": "SCM Craiova W",
               "CSM Galati": "Galati W", "Magura Cisnadie": "Magura Cisnadiei W", "ACS HC Buzau": "Buzau W"},
 }
+# Ältere Schreibweisen aus den Vorsaisons
+TEAM_NAMES["men"].update({"CSM Focsani 2007": "CSM Focsani", "CSM Odorheiu Secuiesc": "Odorhei", "CSU Cluj-Napoca": "Cluj"})
+TEAM_NAMES["women"].update({"CS Gloria 2018 Bistrita-Nasaud": "Bistrita W", "CS HC Zalau": "Zalau W",
+                            "SCM Gloria Buzau": "Buzau W", "CS Magura Cisnadie": "Magura Cisnadiei W"})
+
+# Abgeschlossene Saisons: frhlive zeigt nur die laufende. Die Nummern stammen aus der öffentlichen Wettbewerbsliste
+# (natjecanja13.js), wie sie das Internet Archive während der Saison gespeichert hat (Dez. 2024, März 2026).
+ARCHIVE = {1325: ("men", "24/25"), 1326: ("women", "24/25"), 1699: ("men", "25/26"), 1698: ("women", "25/26")}
 
 
 def season_of(name: str) -> str | None:
@@ -100,23 +108,32 @@ def import_schedule(session: Session, client: frhlive.FrhLiveClient, competition
             continue
         home = canonical_team(session, country, gender, team_names[sg.home], "access").id
         away = canonical_team(session, country, gender, team_names[sg.away], "access").id
+        linked = session.get(SourceRecord, f"{source}:{sg.game_id}") is not None
         game, swapped = _find_existing(session, source, comp.id, home, away, sg.start_moscow, sg.game_id)
         if game is None:
             gid = stable_id("game", source, sg.game_id)
             game = session.get(Game, gid) or Game(id=gid, competition_id=comp.id, source=source)
             report["neu angelegt"] += 1
-        elif not game.external_id:
+        elif not linked:
+            # Erstes Zusammenführen mit einem Spiel aus einer anderen Quelle (Access, HandballAPI)
             if swapped:
                 _swap_orientation(game)
+                _swap_aggregates(session, game)
                 report["Heim/Gast korrigiert"] += 1
             report["zusammengeführt"] += 1
         game.competition_id, game.home_team_id, game.away_team_id = comp.id, home, away
         game.start_moscow, game.date_quality = sg.start_moscow, "exact"
-        game.game_number, game.external_id = (str(sg.round) if sg.round else None), str(sg.game_id)
-        game.finished = sg.finished
-        game.home_score, game.away_score = sg.home_score, sg.away_score
-        game.home_ht, game.away_ht = sg.home_ht, sg.away_ht
-        game.stage, game.stage_type = stage(sg.league)
+        game.game_number = str(sg.round) if sg.round else None
+        if game.source == source:  # die ID einer anderen Quelle (Access-Zeile, HandballAPI-Event) bleibt stehen
+            game.external_id = str(sg.game_id)
+        # Fehlt bei der Quelle das Ergebnis eines Spiels, das eine andere Quelle schon als beendet kennt, bleibt es stehen
+        if sg.finished or game.source == source or not game.finished:
+            game.finished = sg.finished
+            game.home_score, game.away_score = sg.home_score, sg.away_score
+            game.home_ht, game.away_ht = sg.home_ht, sg.away_ht
+        new_stage = stage(sg.league)
+        if game.source == source or not game.stage_type or new_stage[1]:
+            game.stage, game.stage_type = new_stage
         session.add(game)
         session.flush()
         session.merge(SourceRecord(key=f"{source}:{sg.game_id}", game_id=game.id, status="imported",
@@ -153,6 +170,35 @@ def import_romania(session: Session, client: frhlive.FrhLiveClient | None = None
             continue
         import_schedule(session, client, comp_info["broj"], source="frhlive", country=COUNTRY, league=LEAGUE, gender=gender,
                         season=season, team_names=TEAM_NAMES[gender], stage=lambda g, n=comp_info["naziv"]: stage_of(g, n),
+                        latest=latest, report=report, problems=problems)
+    link_priors(session)
+    session.commit()
+    return {"report": dict(report), "problems": problems, "pages_fetched": client.fetched}
+
+
+def _swap_aggregates(session: Session, game: Game):
+    """Spielerstatistik (Heim/Gast) mit den Teams umdrehen."""
+    rows = session.scalars(select(AggregateStat).where(AggregateStat.game_id == game.id)).all()
+    data = [{c.key: getattr(r, c.key) for c in AggregateStat.__table__.columns} for r in rows]
+    for r in rows:
+        session.delete(r)
+    session.flush()
+    for d in data:
+        session.add(AggregateStat(**{**d, "is_home": not d["is_home"]}))
+
+
+def import_romania_archive(session: Session, seasons: list[str] | None = None,
+                           client: frhlive.FrhLiveClient | None = None) -> dict:
+    """Abgeschlossene Saisons (ARCHIVE) mit jedem Wurf; vorhandene Access- und HandballAPI-Spiele werden ergänzt."""
+    client = client or frhlive.FrhLiveClient()
+    report: Counter = Counter()
+    problems: list[str] = []
+    latest = datetime.utcnow() + timedelta(hours=3)
+    for nr, (gender, season) in ARCHIVE.items():
+        if seasons and season not in seasons:
+            continue
+        import_schedule(session, client, nr, source="frhlive", country=COUNTRY, league=LEAGUE, gender=gender,
+                        season=season, team_names=TEAM_NAMES[gender], stage=lambda g: ("Hauptrunde", "league"),
                         latest=latest, report=report, problems=problems)
     link_priors(session)
     session.commit()

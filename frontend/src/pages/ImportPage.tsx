@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useCompetition } from "../App";
 import { useLoad } from "../useLoad";
+import ShotCoverageTable from "../components/ShotCoverageTable";
 
 const when = (iso: string | null) => (iso ? new Date(iso + "Z").toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" }) : "–");
 
@@ -102,6 +103,8 @@ export default function ImportPage() {
           {status.errors?.length > 0 && <div className="error">{status.errors.join(" · ")}</div>}
         </div>
       )}
+
+      <ShotCoverageTable />
 
       <div className="panel table-wrap">
         <h2>Wettbewerbe</h2>

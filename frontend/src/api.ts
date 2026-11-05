@@ -90,6 +90,9 @@ export type Coverage = {
   open_no_line: number;
   open_no_1x2: number;
   open_no_hdp: number;
+  finished_shots: number; // beendet, jeder Wurf gespeichert
+  finished_stats_only: number; // beendet, nur Wurfzahlen je Spieler und Zone
+  finished_no_xg: number; // beendet, nur Ergebnis
 };
 
 export type PasteResult = {

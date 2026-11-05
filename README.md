@@ -102,7 +102,7 @@ Zusätzlich sind Home-Quote Min/Max und Away-Quote Min/Max unabhängig vom gewä
 
 - Wettbewerbe und Teams wie im Access-Bestand („Romania · Liga nationala“, frhlive-Namen → Access-Namen in `TEAM_NAMES`), damit Vorsaison und Teamwerte durchgehen. Unbekannte Teams stehen im Bericht.
 - Würfe nur, wenn die Tore im Spielverlauf genau zum Ergebnis passen und die Wurfzahl höchstens um 2 von der Spielertabelle abweicht.
-- Ältere Saisons bietet die Quelle nicht an. Abrufe mit 1,5 s Pause, Spieldateien unter `data/raw/frhlive/` zwischengespeichert.
+- Abgeschlossene Saisons zeigt frhlive nicht mehr an, die Dateien liegen aber noch beim Anbieter. `scripts\import_romania_archive.py` lädt 24/25 und 25/26 über ihre Wettbewerbsnummern (`ARCHIVE`, aus der öffentlichen Wettbewerbsliste, wie sie das Internet Archive gespeichert hat) mit jedem Wurf und ergänzt die vorhandenen Access- und HandballAPI-Spiele. Abrufe mit 1,5 s Pause, Spieldateien unter `data/raw/frhlive/` zwischengespeichert.
 - Die Rückrunde 25/26 (Januar bis Mai 2026, in Access nicht mehr enthalten) stammt aus der HandballAPI: nur Ergebnisse und Halbzeit, ohne Würfe (`scripts\import_romania_history.py`, liest gespeicherte Antworten, ruft keine API auf). Ihre Spielerstatistik (Würfe und Tore je Zone, Paraden) lädt der automatische Import nach und nach aus der HandballAPI, eine Abfrage pro Spiel, die neuesten zuerst; 5 Abfragen im Monat bleiben frei.
 
 ### Korea (H-Liga, koreahandball.com)
