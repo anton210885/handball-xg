@@ -112,6 +112,8 @@ class FrhShot:
     shooter: str
     goalkeeper: str | None
     assisted: bool
+    majority: bool = False
+    minority: bool = False
 
 
 @dataclass
@@ -119,6 +121,7 @@ class FrhMatch:
     game_id: int
     shots: list[FrhShot] = field(default_factory=list)
     totals: dict[bool, tuple[int, int]] = field(default_factory=dict)  # is_home -> (Tore, Würfe) laut Spielertabelle
+    ht: tuple[int, int] | None = None  # Halbzeitstand, falls die Quelle ihn nur im Spielverlauf hat
 
 
 def parse_competitions(text: str) -> list[dict]:

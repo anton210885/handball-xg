@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .config import DEFAULT_ODDS
@@ -87,6 +87,7 @@ class Game(Base):
     away_attacks: Mapped[int | None] = mapped_column(Integer, nullable=True)
     handballapi_event_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    competition: Mapped[Competition] = relationship(lazy="joined")
     home_team: Mapped[Team] = relationship(foreign_keys=[home_team_id], lazy="joined")
     away_team: Mapped[Team] = relationship(foreign_keys=[away_team_id], lazy="joined")
     line: Mapped["GameLine | None"] = relationship(back_populates="game", lazy="joined", uselist=False)
@@ -131,6 +132,14 @@ class GameLine(Base):
     odds_under: Mapped[float | None] = mapped_column(Float, nullable=True, default=DEFAULT_ODDS)
     source: Mapped[str] = mapped_column(String, default="manual")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Eröffnungskurs (erster Preis im OddsPapi-Verlauf) – Grundlage für CLV und Linienbewegung
+    open_over_line: Mapped[float | None] = mapped_column(Float, nullable=True)
+    open_odds_over: Mapped[float | None] = mapped_column(Float, nullable=True)
+    open_odds_under: Mapped[float | None] = mapped_column(Float, nullable=True)
+    open_hdp_line: Mapped[float | None] = mapped_column(Float, nullable=True)
+    open_odds_home: Mapped[float | None] = mapped_column(Float, nullable=True)
+    open_odds_draw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    open_odds_away: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     game: Mapped[Game] = relationship(back_populates="line")
 
@@ -147,6 +156,23 @@ class Strategy(Base):
     min_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
     stake: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.0)
+    # Archiviert: kein Verifikator, keine Ampel, keine Prognose-Treffer; lässt sich jederzeit zurückholen
+    archived: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+
+
+class StrategyPick(Base):
+    """Verifikator: Tipp einer Strategie auf ein kommendes Spiel, festgehalten vor Anpfiff (Linie und Quote von damals)."""
+    __tablename__ = "strategy_picks"
+    __table_args__ = (UniqueConstraint("strategy_id", "game_id"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    strategy_id: Mapped[int] = mapped_column(ForeignKey("strategies.id", ondelete="CASCADE"), index=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id", ondelete="CASCADE"), index=True)
+    market: Mapped[str] = mapped_column(String)
+    line: Mapped[float | None] = mapped_column(Float, nullable=True)  # Over-Linie bzw. Handicap Heim beim Festhalten
+    odds: Mapped[float] = mapped_column(Float)
+    stake: Mapped[float] = mapped_column(Float, default=1.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)  # erstmals gefunden
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)  # zuletzt vor Anpfiff aktualisiert
 
 
 class AggregateStat(Base):
@@ -177,3 +203,25 @@ class ApiUsage(Base):
     provider: Mapped[str] = mapped_column(String, primary_key=True)
     month: Mapped[str] = mapped_column(String, primary_key=True)  # "2026-10"
     calls: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Bet(Base):
+    """Eine tatsächlich platzierte Wette (Wettbuch)."""
+    __tablename__ = "bets"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id", ondelete="CASCADE"), index=True)
+    market: Mapped[str] = mapped_column(String)  # over | under | home | draw | away | hdp_home | hdp_away
+    line: Mapped[float | None] = mapped_column(Float, nullable=True)  # Torlinie bzw. Handicap Heim zum Zeitpunkt der Wette
+    odds: Mapped[float] = mapped_column(Float)
+    stake: Mapped[float] = mapped_column(Float)
+    bookmaker: Mapped[str | None] = mapped_column(String, nullable=True)
+    placed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    model_prob: Mapped[float | None] = mapped_column(Float, nullable=True)  # Modellwahrscheinlichkeit beim Platzieren
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class AppSetting(Base):
+    """Einstellungen als Schlüssel/Wert (z. B. Bankroll, Kelly-Anteil)."""
+    __tablename__ = "app_settings"
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(String)

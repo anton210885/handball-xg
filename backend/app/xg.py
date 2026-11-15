@@ -78,8 +78,22 @@ def fit(shots: list[tuple[str | None, str | None, bool]], shrinkage: float = 30.
     return fit_counts(Counter(shots), shrinkage)
 
 
-def fit_counts(counts: dict[tuple[str | None, str | None, bool], int], shrinkage: float = 30.0) -> XgModel:
-    """Wie fit, mit aggregierten Wurfzahlen für zeitlich fortlaufendes Lernen."""
+PRIOR_LEAGUE = 300.0  # Würfe, ab denen die eigene Liga-Quote mehr zählt als die der anderen Ligen
+PRIOR_SHRINK = 100.0  # dasselbe für Zone und Zone × Angriffsart, wenn ein Vor-Modell da ist
+
+
+def _clip(p: float) -> float:
+    return min(0.99, max(0.01, p))
+
+
+def fit_counts(counts: dict[tuple[str | None, str | None, bool], int], shrinkage: float = 30.0,
+               prior: XgModel | None = None) -> XgModel:
+    """Wie fit, mit aggregierten Wurfzahlen für zeitlich fortlaufendes Lernen.
+
+    prior: Modell aus anderen Daten (z. B. alle Ligen). Dann startet jede Ebene bei den
+    Quoten dieses Modells – verschoben um den Unterschied der eigenen Liga – und wandert
+    mit wachsender Wurfzahl zu den eigenen Quoten. Ohne Würfe ist das Ergebnis das Vor-Modell.
+    """
     league = Cell()
     zones: dict[str, Cell] = defaultdict(Cell)
     cells: dict[tuple[str, str], Cell] = defaultdict(Cell)
@@ -95,12 +109,30 @@ def fit_counts(counts: dict[tuple[str | None, str | None, bool], int], shrinkage
             cells[key].shots += count
             cells[key].goals += count if is_goal else 0
 
-    league.rate = league.goals / league.shots if league.shots else 0.5
-    for z in zones.values():
-        z.rate = (z.goals + shrinkage * league.rate) / (z.shots + shrinkage)
-    for (zone, _), c in cells.items():
-        parent = zones[zone].rate
-        c.rate = (c.goals + shrinkage * parent) / (c.shots + shrinkage)
+    if prior is None:
+        league.rate = league.goals / league.shots if league.shots else 0.5
+        for z in zones.values():
+            z.rate = (z.goals + shrinkage * league.rate) / (z.shots + shrinkage)
+        for (zone, _), c in cells.items():
+            parent = zones[zone].rate
+            c.rate = (c.goals + shrinkage * parent) / (c.shots + shrinkage)
+        return XgModel(shrinkage, league, dict(zones), dict(cells))
+
+    k = PRIOR_SHRINK
+    league.rate = (league.goals + PRIOR_LEAGUE * prior.league.rate) / (league.shots + PRIOR_LEAGUE)
+    shift = league.rate / prior.league.rate if prior.league.rate else 1.0
+    for name in prior.zones:
+        zones[name]  # Zonen, die die Liga noch nicht hat, kommen aus dem Vor-Modell
+    for key in prior.cells:
+        cells[key]
+    for name, z in zones.items():
+        target = _clip(prior.zones[name].rate * shift) if name in prior.zones else league.rate
+        z.rate = (z.goals + k * target) / (z.shots + k)
+    for (zone, group), c in cells.items():
+        own_zone = zones[zone].rate
+        pc, pz = prior.cells.get((zone, group)), prior.zones.get(zone)
+        target = _clip(pc.rate * own_zone / pz.rate) if pc and pz and pz.rate else own_zone
+        c.rate = (c.goals + k * target) / (c.shots + k)
     return XgModel(shrinkage, league, dict(zones), dict(cells))
 
 
@@ -110,12 +142,31 @@ def fit_from_db(session: Session, shrinkage: float = 30.0) -> XgModel:
 
 
 def recompute_all(session: Session, shrinkage: float = 30.0) -> XgModel:
-    """Modell neu schätzen und xG für jeden Wurf in der DB speichern."""
-    model = fit_from_db(session, shrinkage)
-    rows = session.execute(select(Shot.id, Shot.court_zone, Shot.attack_type)).all()
+    """xG für jeden Wurf neu berechnen und speichern.
+
+    Erst ein Modell aus allen Würfen; dann je Liga (Land, Liga, Geschlecht) ein eigenes,
+    das bei diesem Gesamtmodell startet und sich mit genug Würfen an die Liga anpasst.
+    Zurückgegeben wird das Gesamtmodell (für die Tabelle auf der xG-Seite).
+    """
+    from .models import Competition, Game
+    from .pregame import league_key
+
+    comps = {c.id: league_key(c) for c in session.scalars(select(Competition))}
+    rows = session.execute(
+        select(Shot.id, Shot.court_zone, Shot.attack_type, Shot.outcome, Game.competition_id)
+        .join(Game, Game.id == Shot.game_id)
+    ).all()
+    total: Counter = Counter()
+    per_league: dict = defaultdict(Counter)
+    for _, z, a, o, cid in rows:
+        key = (z, a, o == "goal")
+        total[key] += 1
+        per_league[comps.get(cid)][key] += 1
+    model = fit_counts(total, shrinkage)
+    models = {lk: fit_counts(c, shrinkage, prior=model) for lk, c in per_league.items()}
     session.execute(
         update(Shot),
-        [{"id": sid, "xg": model.predict(z, a)} for sid, z, a in rows],
+        [{"id": sid, "xg": models[comps.get(cid)].predict(z, a)} for sid, z, a, _, cid in rows],
     )
     session.commit()
     return model

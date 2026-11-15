@@ -2,6 +2,10 @@
 
 Die Versionsnummer steht in `backend/app/__init__.py` und `frontend/package.json` (ein Test prüft, dass beide gleich sind). Sie wird im Seitenmenü und unter `/api/version` angezeigt.
 
+## Noch nicht veröffentlicht
+- **Deutschland: Opel HBL und 2. HBL mit jedem Wurf** von opel-hbl.de (Sportradar-Live-Ticker), Saisons 24/25 bis 26/27; im automatischen Import enthalten, von Hand `scripts\import_hbl.py`. Zone mit Seite aus den Koordinaten, Torwart aus den Torwartwechseln, Über-/Unterzahl aus Zeitstrafen, Vorlagen, Blocks, Halbzeitstand. Fehlwürfe ohne Unterscheidung gehalten/vorbei (neues Wurfergebnis „Fehlwurf“), Gegenstoß geschätzt. Vorhandene HandballAPI-Spiele werden ergänzt.
+- Gemeinsamer Import (`import_schedule`): andere Quellen für die Würfe möglich, Über-/Unterzahl wird gespeichert, ein fehlender Halbzeitstand der Quelle löscht keinen vorhandenen mehr.
+
 ## 0.12.0 – 2026-11-05
 - **Rumänien 24/25 und 25/26 mit jedem Wurf** von frhlive (`scripts\import_romania_archive.py`): Die Wettbewerbsnummern der abgeschlossenen Saisons stammen aus der öffentlichen Wettbewerbsliste, wie sie das Internet Archive gespeichert hat. Vorhandene Access- und HandballAPI-Spiele werden ergänzt: 593 Spiele, 585 mit jedem Wurf (7 ohne, weil die Wurfzahl stärker von der Spielertabelle abweicht). 21 falsche Access-Ergebnisse korrigiert (z. B. viermal 21:39 am 03.05.2025), stichprobenweise mit der HandballAPI bestätigt; 28 Spiele fehlten in Access.
 - Fehlt bei frhlive das Ergebnis eines Spiels, das eine andere Quelle schon als beendet kennt, bleibt das Ergebnis stehen (Bistrita – Rapid, 12.03.2026).

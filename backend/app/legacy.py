@@ -44,6 +44,8 @@ def legacy_metrics(f: dict, gender: str | None) -> dict:
         "away_Last_5_XGAD_Median": _neg(g("away_last5_keeper_median")),
         "home_count_over_bet_0_8_last5": g("home_over_hits_last5"),
         "away_count_over_bet_0_8_last5": g("away_over_hits_last5"),
+        "home_consecutive_over_bet_minus1": g("home_over_loss_streak"),
+        "away_consecutive_over_bet_minus1": g("away_over_loss_streak"),
     }
     hXG, aXG, hXGA, aXGA = m["Home_avgXG"], m["Away_avgXG"], m["Home_avgXGA"], m["Away_avgXGA"]
     hexp, aexp = m["home_expGoal"], m["away_expGoal"]
@@ -59,6 +61,7 @@ def legacy_metrics(f: dict, gender: str | None) -> dict:
     m["powerRaiting_avgXGA"] = _div(hXGA, aXGA)
     m["powerRaiting_expGoals"] = _div(hexp, aexp)
     m["differenceSum_expGoal"] = _add(hexp, aexp)
+    m["expSumGoal"] = m["differenceSum_expGoal"]  # im Notebook ein zweiter Name für dieselbe Summe
     m["difference_expGoal"] = _add(hexp, _neg(aexp))
 
     m["homeExpGoal_with_GK"] = _add(hXG, hXGD, aXGAD)
@@ -90,6 +93,7 @@ def legacy_metrics(f: dict, gender: str | None) -> dict:
     m["last5_Games_difference_expGoals_with_GK"] = _add(m["last5_Games_homeExpGoal_with_GK"], _neg(m["last5_Games_awayExpGoal_with_GK"]))
     m["last5_Games_differenceSum_expGoals_with_GK_to_over"] = _add(m["last5_Games_Sum_expGoal_with_GK"], _neg(ovr))
     m["Sum_count"] = _add(m["home_count_over_bet_0_8_last5"], m["away_count_over_bet_0_8_last5"])
+    m["Sum_count_minus1"] = _add(m["home_consecutive_over_bet_minus1"], m["away_consecutive_over_bet_minus1"])
     return m
 
 

@@ -163,7 +163,7 @@ def test_bookmaker_switch_rechecks_and_clears_stale_values(history_session, monk
 
 def test_refresh_does_not_mix_old_prices_with_new_partial_history(history_session, monkeypatch):
     monkeypatch.setattr(oddspapi_sync, "ODDSPAPI_BOOKMAKERS", "22bet")
-    monkeypatch.setattr(oddspapi, "extract_line", lambda *args: {"odds_home": 1.5})
+    monkeypatch.setattr(oddspapi, "extract_line", lambda *args, **kwargs: {"odds_home": 1.5})
     client = SimpleNamespace(calls=0, historical_odds=lambda *args: {"bookmakers": {"22bet": {}}})
     oddspapi_sync.sync_competition(history_session, history_session.get(Competition, 8070),
                                    client, MARKETS, historical_only=True)

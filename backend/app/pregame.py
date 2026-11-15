@@ -21,7 +21,16 @@ def league_key(comp):
     return re.sub(r"\s+", " ", name).strip(), comp.gender
 
 
-def historical_team_stats(session):
+def league_label(comp) -> str:
+    """Name der Liga wie in der Oberfläche („Land · Liga“), ohne Saison und Geschlecht."""
+    if comp.league:
+        return f"{comp.country or ''} · {comp.league}".removeprefix(" · ")
+    name = league_key(comp)[0]
+    return "Russland · Superliga" if name == "Суперлига" else name
+
+
+def historical_team_stats(session, league_prior: bool = True):
+    """league_prior=False: alte Berechnung – jede Liga startet ohne eigene Würfe bei 50 %, ohne andere Ligen."""
     from .features import TeamGame
     competitions = {c.id: c for c in session.scalars(select(Competition))}
     games = session.scalars(select(Game).where(
@@ -38,13 +47,18 @@ def historical_team_stats(session):
     for stat in session.scalars(select(AggregateStat)):
         aggregated[stat.game_id][stat.is_home] = stat
     training = defaultdict(Counter)
+    training_all: Counter = Counter()
     aggregate_training = defaultdict(lambda: [0, 0])
+    aggregate_all = [0, 0]
     result = defaultdict(lambda: defaultdict(list))
     for _, day in groupby(games, key=lambda g: g.start_moscow.date()):
         day = list(day)
         models = {league_key(competitions[g.competition_id]): None for g in day}
         for group in models:
-            models[group] = fit_counts(training[group])
+            # Startwert: Modell der anderen Ligen (nur frühere Tage), dann die eigene Liga
+            others = training_all - training[group]
+            prior = fit_counts(others) if others and league_prior else None
+            models[group] = fit_counts(training[group], prior=prior)
         for g in day:
             group = league_key(competitions[g.competition_id])
             model = models[group]
@@ -56,7 +70,17 @@ def historical_team_stats(session):
                 shots[home] += count
             if not g.shots_imported:
                 n, goals = aggregate_training[group]
-                rate = (goals + 15) / (n + 30)  # Neutral 0.5 prior, no future outcomes.
+                n_o, goals_o = aggregate_all[0] - n, aggregate_all[1] - goals
+                if not league_prior:
+                    rate = (goals + 15) / (n + 30)  # alte Berechnung: neutral 0,5
+                else:
+                    if n_o > 0:
+                        base = goals_o / n_o  # Quote der anderen Ligen, nur frühere Tage
+                    elif training_all:
+                        base = fit_counts(training_all).league.rate
+                    else:
+                        base = 0.5
+                    rate = (goals + 300 * base) / (n + 300)
                 for side, stat in aggregated[g.id].items():
                     if stat.shots is not None and stat.goals is not None and stat.shots >= stat.goals >= 0:
                         totals[side] = stat.shots * rate
@@ -72,9 +96,12 @@ def historical_team_stats(session):
             group = league_key(competitions[g.competition_id])
             for home, zone, attack, goal, count in (raw[g.id] if g.shots_imported else []):
                 training[group][zone, attack, goal] += count
+                training_all[zone, attack, goal] += count
             if not g.shots_imported:
                 for stat in aggregated[g.id].values():
                     if stat.shots is not None and stat.goals is not None and stat.shots >= stat.goals >= 0:
                         aggregate_training[group][0] += stat.shots
                         aggregate_training[group][1] += stat.goals
+                        aggregate_all[0] += stat.shots
+                        aggregate_all[1] += stat.goals
     return result, competitions

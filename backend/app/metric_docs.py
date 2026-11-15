@@ -1,5 +1,5 @@
 """Formeln und Herkunft aller erlaubten Vor-Spiel-Metriken."""
-from .features import FEATURES
+from .features import ALT_SUFFIX, FEATURES, alt_names
 from .legacy import LEGACY_NAMES
 
 BASE = {'pred_home': ('Erwartete Heimtore aus eigener bisheriger Chancenqualität und bisher zugelassenen Chancen des Gastes.',
@@ -64,6 +64,10 @@ TEAM = {'avg_goals': ('Erzielte Tore je früherem Spiel.', 'gewichteter Mittelwe
  'over_hits_last5': ('Anzahl früherer Spiele über ihrer damaligen Torlinie, in den letzten bis zu fünf Spielen. Spiele '
                      'ohne Linie zählen nicht. Das ist eine Anzahl, keine Trefferquote.',
                      'Anzahl(Tore + Gegentore > damalige over_line)'),
+ 'over_loss_streak': ('Wie viele der letzten Spiele in Folge unter ihrer damaligen Torlinie blieben (Over-Wette verloren). '
+                      'Spiele ohne Linie werden übersprungen; ein Over-Treffer oder genau die Linie beendet die Serie. '
+                      'Reicht in die Vorsaison zurück, wenn diese verknüpft ist.',
+                      'Anzahl zuletzt in Folge: Tore + Gegentore < damalige over_line'),
  'prev_games': ('Anzahl berücksichtigter früherer Spiele der verknüpften Vorsaison.',
                 'Anzahl gültiger Vorsaisonspiele vor dem Zielspiel)'),
  'weight_current': ('Anteil aktueller Saison an gewichteten Mittelwerten; 0 bis 1.',
@@ -95,12 +99,15 @@ LEGACY_FORMULAS = {'sex': 'gender',
  'away_Last_5_XGAD_Median': '−away_last5_keeper_median',
  'home_count_over_bet_0_8_last5': 'home_over_hits_last5',
  'away_count_over_bet_0_8_last5': 'away_over_hits_last5',
+ 'home_consecutive_over_bet_minus1': 'home_over_loss_streak',
+ 'away_consecutive_over_bet_minus1': 'away_over_loss_streak',
  'difference_avgXG': '(Home_avgXG + −Away_avgXG)',
  'differenceSum_avgXG': '(Home_avgXG + Away_avgXG)',
  'powerRaiting_avgXG': '(Home_avgXG / Away_avgXG)',
  'powerRaiting_avgXGA': '(Home_avgXGA / Away_avgXGA)',
  'powerRaiting_expGoals': '(home_expGoal / away_expGoal)',
  'differenceSum_expGoal': '(home_expGoal + away_expGoal)',
+ 'expSumGoal': '(home_expGoal + away_expGoal)',
  'difference_expGoal': '(home_expGoal + −away_expGoal)',
  'homeExpGoal_with_GK': '(Home_avgXG + home_XGD + away_XGAD)',
  'awayExpGoal_with_GK': '(Away_avgXG + away_XGD + home_XGAD)',
@@ -127,18 +134,53 @@ LEGACY_FORMULAS = {'sex': 'gender',
  'last5_Games_powerRaiting_expGoals_with_GK': '(last5_Games_homeExpGoal_with_GK / last5_Games_awayExpGoal_with_GK)',
  'last5_Games_difference_expGoals_with_GK': '(last5_Games_homeExpGoal_with_GK + −last5_Games_awayExpGoal_with_GK)',
  'last5_Games_differenceSum_expGoals_with_GK_to_over': '(last5_Games_Sum_expGoal_with_GK + −over)',
- 'Sum_count': '(home_count_over_bet_0_8_last5 + away_count_over_bet_0_8_last5)'}
+ 'Sum_count': '(home_count_over_bet_0_8_last5 + away_count_over_bet_0_8_last5)',
+ 'Sum_count_minus1': '(home_consecutive_over_bet_minus1 + away_consecutive_over_bet_minus1)'}
 
 TIMING = "Nur frühere Kalendertage; aktuelles Spiel, spätere Spiele und Spiele desselben Tages sind ausgeschlossen."
 HISTORY = "Teamhistorie desselben Wettbewerbs, optional verknüpfte Vorsaison derselben Liga/Geschlechtsgruppe. Mittelwerte: (Summe aktuell + k × Ø Vorsaison) / (n + k); k standardmäßig 3. Ohne Vorsaison k = 0. Letzte 5: aktuelle Historie, am Saisonanfang ergänzt aus der Vorsaison."
-XG = "Wurfmodell: Zone × Angriffsgruppe (Position/Umschalten), hierarchische Glättung k = 30. Pro historischem Spiel nur Lerndaten früherer Tage derselben Liga und Geschlechtsgruppe; ohne Lerndaten neutrale Wurfchance 0,5. Gespeicherte, nachträglich neu geschätzte Shot.xg werden für Strategien nicht verwendet. Bei aggregierten Statistiken ohne verlässliche Kategorie-Tore gilt ein getrenntes gröberes Modell: Gesamtwürfe × geglättete Torquote ausschließlich früherer Spiele derselben Liga/Geschlechtsgruppe. Ergebnisse ohne Wurfzahlen liefern keine xG; xG-Mittelwerte berücksichtigen nur vorhandene Werte."
+XG = "Wurfmodell: Zone × Angriffsgruppe (Position/Umschalten). Pro historischem Spiel nur Lerndaten früherer Tage. Jede Liga (mit Geschlecht) startet beim Modell der anderen Ligen und wandert mit eigenen Würfen zu ihren eigenen Quoten (Liga-Quote ab ca. 300 Würfen überwiegend eigen, Zonen ab ca. 100). Gespeicherte, nachträglich neu geschätzte Shot.xg werden für Strategien nicht verwendet. Bei aggregierten Statistiken ohne verlässliche Kategorie-Tore gilt ein getrenntes gröberes Modell: Gesamtwürfe × Torquote früherer Spiele derselben Liga/Geschlechtsgruppe, geglättet zur Quote der anderen Ligen. Ergebnisse ohne Wurfzahlen liefern keine xG; xG-Mittelwerte berücksichtigen nur vorhandene Werte."
 BOOK = "Eingegebene Bookmaker-Pre-Match-Quote bzw. -Linie. Der ursprüngliche Erfassungszeitpunkt ist historisch nicht versioniert; die Eingabe muss tatsächlich vor dem Spiel verfügbar gewesen sein. Keine Ergebnis-Ableitung."
+
+
+FAIR = ("Faire Linie (app/fair_line.py): Vorhersage aus xG und Toren, je Liga linear nachkalibriert nur mit Spielen "
+        "früherer Tage; Streuung aus denselben Spielen; Normalverteilung auf ganze Tore.")
+ML = ("ML-Test (app/ml_margin.py): je Kalendermonat ein eigenes Modell, gelernt nur aus beendeten Spielen vor dem "
+      "Monatsersten; künftige Monate nutzen das Modell des laufenden Monats.")
+MIX = " Mit echten Quoten gemischt: 25 % Modell, 75 % Markt ohne Marge."
+NEW_DOCS = {
+    "home_rest_days": ("Tage seit dem letzten Spiel des Heimteams in irgendeinem Wettbewerb.", "Datum − Datum letztes Spiel", "Spielplan aller Wettbewerbe."),
+    "away_rest_days": ("Tage seit dem letzten Spiel des Gastteams in irgendeinem Wettbewerb.", "Datum − Datum letztes Spiel", "Spielplan aller Wettbewerbe."),
+    "rest_diff": ("Ruhetage Heim minus Ruhetage Gast; positiv = Heimteam ausgeruhter.", "home_rest_days − away_rest_days", "Spielplan aller Wettbewerbe."),
+    "season_progress": ("Wie weit die Saison fortgeschritten ist: Tage seit dem ersten Spiel des Wettbewerbs geteilt durch 270, höchstens 1.",
+                        "min(1, Tage seit Saisonstart / 270)", "Spielplan des Wettbewerbs."),
+    "fair_total": ("Erwartete Tore gesamt laut kalibriertem Modell.", "a + b · Ø(pred_total, pred_total_goals)", FAIR),
+    "fair_total_minus_line": ("Faire Torlinie minus Over-Linie; positiv = Modell erwartet mehr Tore als der Buchmacher.", "fair_total − over_line", FAIR),
+    "fair_margin": ("Erwartete Tordifferenz Heim − Gast laut kalibriertem Modell (inkl. Heimvorteil der Liga).", "a + b · Ø(pred_margin, Tor-Differenz)", FAIR),
+    "fair_margin_plus_hdp": ("Faire Differenz plus Handicap Heim; positiv = Heim deckt laut Modell.", "fair_margin + hdp_line", FAIR),
+    "ml_margin": ("Test-Metrik: faire Tordifferenz plus Korrektur eines LightGBM-Modells, das aus allen Vor-Spiel-Metriken "
+                  "(ohne Linien und Quoten) lernt, wo fair_margin systematisch danebenliegt. Im Vorwärtstest etwas genauer "
+                  "als fair_margin, aber klar ungenauer als die echte Handicap-Linie – nur zum Beobachten.",
+                  "fair_margin + LightGBM(Vor-Spiel-Metriken)", ML),
+    "ml_margin_plus_hdp": ("ML-Differenz plus Handicap Heim; positiv = Heim deckt laut ML-Test-Modell.", "ml_margin + hdp_line", ML),
+}
+for _m, _t in (("over", "Over"), ("under", "Under"), ("home", "Heimsieg"), ("draw", "Unentschieden"), ("away", "Auswärtssieg")):
+    NEW_DOCS[f"p_{_m}"] = (f"Wahrscheinlichkeit für {_t}." + MIX, f"P({_t})", FAIR)
+    NEW_DOCS[f"ev_{_m}"] = (f"Erwarteter Gewinn je 1 Einsatz auf {_t} zur angebotenen Quote; Push = Einsatz zurück.",
+                            f"p_{_m} · (Quote − 1) − P(Verlust)", FAIR)
+for _m, _t in (("hdp_home", "Heim deckt das Handicap"), ("hdp_away", "Gast deckt das Handicap")):
+    NEW_DOCS[f"p_{_m}"] = (f"Wahrscheinlichkeit: {_t} (nur Modell, Handicap-Quoten fehlen).", f"P({_t})", FAIR)
+for _m, _t in (("over", "Over"), ("home", "Heimsieg"), ("away", "Auswärtssieg")):
+    NEW_DOCS[f"mkt_p_{_m}"] = (f"Wahrscheinlichkeit für {_t} laut Quoten, Buchmacher-Marge proportional herausgerechnet.",
+                               "(1/Quote) / Σ(1/Quoten)", BOOK)
 
 
 def metric_docs():
     docs = {}
     for key, label in FEATURES.items():
-        if key in BASE:
+        if key in NEW_DOCS:
+            description, formula, source = NEW_DOCS[key]
+        elif key in BASE:
             description, formula = BASE[key]
             source = HISTORY + " " + XG
         elif key in ("is_knockout", "is_league"):
@@ -173,4 +215,8 @@ def metric_docs():
         if key == "tour":
             source = "Anzahl früherer Spiele beider Teams; Näherung, kein offizieller Spieltag."
         docs[key] = {"label":key, "description":description, "formula":formula, "source":source, "timing":timing}
+    for key, label in alt_names().items():
+        base = docs[key[:-len(ALT_SUFFIX)]]
+        docs[key] = {**base, "label": label,
+                     "description": "Wie " + key[:-len(ALT_SUFFIX)] + ", aber mit der alten xG-Berechnung: jede Liga lernt nur aus eigenen Würfen und startet ohne Daten bei 50 % Torchance. Zum Vergleich mit der neuen Berechnung (Startwert aus den anderen Ligen). " + base["description"]}
     return docs

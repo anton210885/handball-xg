@@ -21,6 +21,8 @@ from sqlalchemy.orm import Session
 from . import importer, xg
 from .korea_import import import_korea
 from .croatia_import import CURRENT_SEASON as CROATIA_SEASON, import_croatia
+from .hbl_import import current_year as hbl_year
+from .hbl_import import import_hbl
 from .romania_import import backfill_lineups, import_romania
 from .models import Competition, Game
 
@@ -74,13 +76,21 @@ def run_once(session: Session) -> str:
         new_croatia = 0
         parts.append(f"Kroatien: Fehler ({ex})")
     try:
+        hbl = import_hbl(session, years=[hbl_year()], settle_hours=SETTLE_HOURS)
+        new_hbl = hbl["report"].get("mit Würfen", 0)
+        parts.append(f"Deutschland (HBL): {new_hbl} neu")
+    except Exception as ex:
+        log.exception("HBL-Import fehlgeschlagen")
+        new_hbl = 0
+        parts.append(f"Deutschland (HBL): Fehler ({ex})")
+    try:
         # Spielerstatistik älterer rumänischer Spiele, solange das HandballAPI-Kontingent reicht (5 Abfragen bleiben übrig)
         lineups = backfill_lineups(session, reserve=5)
         if lineups["report"].get("geladen"):
             parts.append(f"Rumänien Spielerstatistik: {lineups['report']['geladen']} nachgeladen, {lineups['offen']} offen")
     except Exception:
         log.exception("Nachladen der Spielerstatistik fehlgeschlagen")
-    if new_korea or new_romania or new_croatia:
+    if new_korea or new_romania or new_croatia or new_hbl:
         xg.recompute_all(session)
     return "; ".join(parts)
 

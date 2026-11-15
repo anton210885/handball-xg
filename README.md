@@ -18,7 +18,7 @@ Die Webseite holt ihre Daten aus einer JSON-Schnittstelle:
 
 Die Rohdaten werden unter `backend/data/raw/` zwischengespeichert. Ein erneuter Import lädt sie also nicht noch einmal.
 
-**Automatisch:** Der Server lädt alle 6 Stunden (`AUTO_IMPORT_HOURS`, 0 = aus) die laufenden Saisons nach – Russland (jeder rushandball-Wettbewerb mit Spielen von vor drei Wochen bis in zwei Wochen), die aktuelle koreanische Saison sowie die rumänischen und kroatischen Ligen. Neu beendete Spiele bekommen ihre Würfe frühestens 3 Stunden nach Anpfiff, danach werden xG und Team-Werte neu berechnet. Stand und nächster Lauf stehen auf „Daten-Import“.
+**Automatisch:** Der Server lädt alle 6 Stunden (`AUTO_IMPORT_HOURS`, 0 = aus) die laufenden Saisons nach – Russland (jeder rushandball-Wettbewerb mit Spielen von vor drei Wochen bis in zwei Wochen), die aktuelle koreanische Saison sowie die rumänischen, kroatischen und deutschen Ligen (Opel HBL, 2. HBL). Neu beendete Spiele bekommen ihre Würfe frühestens 3 Stunden nach Anpfiff, danach werden xG und Team-Werte neu berechnet. Stand und nächster Lauf stehen auf „Daten-Import“.
 
 ### xG-Modell (`backend/app/xg.py`)
 Die Torquote wird pro **Feldzone × Angriffsart** (Positionsangriff / Umschalten) aus allen Würfen geschätzt. Seltene Kombinationen werden zur Zonenquote hin geglättet: `(Tore + k·Zonenquote) / (Würfe + k)`. Ein 7-m-Wurf hat eine eigene Quote.
@@ -96,6 +96,14 @@ Zusätzlich sind Home-Quote Min/Max und Away-Quote Min/Max unabhängig vom gewä
 - Die Wettbewerbsnummern je Saison stehen im Archiv des Verbands (https://hrs.hr/povijesna-natjecanja/, „ID natjecanja“) und in `COMPETITIONS` in `app/croatia_import.py`; eine neue Saison wird dort eingetragen (ältere ab 2019/20 wären ebenso verfügbar).
 - Wettbewerbe und Teams wie im Access-Bestand („Croatia · Premijer liga“, „Croatia · HRL“); vorhandene Access-Spiele werden ergänzt (Heim/Gast notfalls korrigiert), ihre Linien bleiben.
 - Spielphasen: Liga A/B und Meisterrunde = Hauptrunde, Abstiegsrunde und Relegation = Platzierungsrunde, Finale und Europa-Playoff = KO-Spiel.
+
+### Deutschland (Opel HBL, 2. HBL, opel-hbl.de)
+`scripts\import_hbl.py` (optional Liga `Bundesliga`/`2. Bundesliga` und Startjahr, z. B. `2026`) lädt ab 2024/25 Spielplan, Ergebnis und aus dem Live-Ticker **jeden Wurf** – über die öffentliche Schnittstelle der Sportradar-Widgets, die opel-hbl.de selbst einbettet (Seite 248 = HBL, 254 = 2. HBL).
+
+- Je Wurf: Zone (Nahwurfzone, Außen, Rückraum mit Seite aus den Koordinaten; 7 m; aus der eigenen Hälfte = leeres Tor), Tor/Fehlwurf/Block, Werfer, Zeit, Vorlage. Torwart aus den Torwartwechseln, Über-/Unterzahl aus den Zeitstrafen, Halbzeitstand aus dem Spielverlauf.
+- Nicht in der Quelle: ob ein Fehlwurf gehalten wurde oder vorbeiging (`missed`, „Fehlwurf“ – Torwartparaden zählen daher nicht) und ob es ein Gegenstoß war. Gegenstoß wird geschätzt: Wurf höchstens 10 s nach Ballverlust oder Fehlwurf des Gegners.
+- Würfe nur, wenn die Tore im Ticker genau zum Ergebnis passen. Vorhandene Spiele aus der HandballAPI werden ergänzt; Teamnamen → Bestand in `hbl_import.TEAM_NAMES`, neue Teams (2. HBL) unter ihrem HBL-Namen.
+- Die Frauen-Bundesliga hat eine eigene Seite und ist nicht enthalten. Abrufe mit 1,5 s Pause, Ticker beendeter Spiele unter `data/raw/hbl/`.
 
 ### Rumänien (Liga Zimbrilor, Liga Florilor, frhlive2.com)
 `scripts\import_romania.py` lädt die laufende Saison von frhlive2.com, der Live-Statistik des rumänischen Verbands (Daten von sportinfocentar2.com): Spielplan, Ergebnis, Halbzeit und aus jedem beendeten Spiel den **Spielverlauf mit jedem Wurf** – Zone (Außen und Rückraum mit Seite, Kreis, 7 m, Gegenstoß, Durchbruch, leeres Tor), Ergebnis, Torzone, Werfer, Torwart und Vorlage.

@@ -13,6 +13,7 @@ import re
 from collections import Counter
 from datetime import datetime, timedelta
 
+import httpx
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -90,24 +91,30 @@ def _find_existing(session: Session, source: str, comp_id: int, home: int, away:
 
 def import_schedule(session: Session, client: frhlive.FrhLiveClient, competition: int, *, source: str, country: str,
                     league: str, gender: str, season: str, team_names: dict[str, str], stage, latest: datetime,
-                    report: Counter, problems: list[str]) -> None:
+                    report: Counter, problems: list[str], parse=frhlive.parse_match, unknown_teams_as_new: bool = False,
+                    resolve_team=None) -> None:
     """Einen Wettbewerb der sportinfocentar-Daten übernehmen: Spiele anlegen oder ergänzen, Würfe beendeter Spiele.
     ``source`` (z. B. „frhlive“, „hrs“) bildet die Schlüssel der Quelldaten und die IDs neuer Spiele und Würfe.
-    ``stage(gruppe)`` liefert (Spielphase, Typ)."""
+    ``stage(gruppe)`` liefert (Spielphase, Typ). ``parse(client.match(id), id)`` liefert die Würfe als FrhMatch.
+    ``unknown_teams_as_new``: Teams ohne Eintrag in ``team_names`` unter ihrem Namen anlegen statt überspringen.
+    ``resolve_team(name)``: vorhandene Team-ID zu einem Namen (oder None); sonst gilt das Access-Team des Namens."""
     from .korea_import import _swap_orientation
     comp = canonical_competition(session, country, league, gender, season, source)
     for sg in client.schedule(competition):
         if sg.start_moscow is None:
             continue
-        if sg.home not in team_names or sg.away not in team_names:
+        if not unknown_teams_as_new and (sg.home not in team_names or sg.away not in team_names):
             problems.append(f"Unbekanntes Team: {sg.home} – {sg.away} ({sg.start_moscow:%d.%m.%Y})")
             report["unbekanntes Team"] += 1
             continue
         if sg.finished and {sg.home_score, sg.away_score} == {10, 0}:
             report["kampflos (übersprungen)"] += 1  # am grünen Tisch gewertet, nicht gespielt
             continue
-        home = canonical_team(session, country, gender, team_names[sg.home], "access").id
-        away = canonical_team(session, country, gender, team_names[sg.away], "access").id
+        def team_id(name):
+            name = team_names.get(name, name)
+            return (resolve_team and resolve_team(name)) or canonical_team(session, country, gender, name, "access").id
+
+        home, away = team_id(sg.home), team_id(sg.away)
         linked = session.get(SourceRecord, f"{source}:{sg.game_id}") is not None
         game, swapped = _find_existing(session, source, comp.id, home, away, sg.start_moscow, sg.game_id)
         if game is None:
@@ -130,7 +137,8 @@ def import_schedule(session: Session, client: frhlive.FrhLiveClient, competition
         if sg.finished or game.source == source or not game.finished:
             game.finished = sg.finished
             game.home_score, game.away_score = sg.home_score, sg.away_score
-            game.home_ht, game.away_ht = sg.home_ht, sg.away_ht
+            if sg.home_ht is not None or not sg.finished:  # HBL: Halbzeit kommt erst aus dem Spielverlauf
+                game.home_ht, game.away_ht = sg.home_ht, sg.away_ht
         new_stage = stage(sg.league)
         if game.source == source or not game.stage_type or new_stage[1]:
             game.stage, game.stage_type = new_stage
@@ -141,8 +149,8 @@ def import_schedule(session: Session, client: frhlive.FrhLiveClient, competition
 
         if game.finished and not game.shots_imported and sg.start_moscow <= latest:
             try:
-                match = frhlive.parse_match(client.match(sg.game_id), sg.game_id)
-            except ValueError as ex:  # unlesbare Spieldatei: im Bericht nennen, den Rest weiter importieren
+                match = parse(client.match(sg.game_id), sg.game_id)
+            except (ValueError, KeyError, httpx.HTTPError) as ex:  # unlesbare Spieldatei: im Bericht nennen, den Rest weiter importieren
                 problems.append(f"{sg.start_moscow:%d.%m.%Y} {sg.home} – {sg.away}: Spieldatei nicht lesbar ({ex})")
                 report["Würfe nicht übernommen"] += 1
                 session.commit()
@@ -150,6 +158,8 @@ def import_schedule(session: Session, client: frhlive.FrhLiveClient, competition
             issues = frhlive.validate(match, sg.home_score, sg.away_score)
             if match.shots and not issues:
                 _store_shots(session, game, match, source)
+                if match.ht and game.home_ht is None:
+                    game.home_ht, game.away_ht = match.ht
                 report["mit Würfen"] += 1
             else:
                 problems.append(f"{sg.start_moscow:%d.%m.%Y} {sg.home} – {sg.away}: " + ("; ".join(issues) or "kein Spielverlauf"))
@@ -213,6 +223,7 @@ def _store_shots(session: Session, game: Game, match: frhlive.FrhMatch, source: 
             team_id=game.home_team_id if s.is_home else game.away_team_id, is_home=s.is_home,
             period=s.period, minute=s.minute, shooter_name=s.shooter, goalkeeper_name=s.goalkeeper,
             outcome=s.outcome, court_zone=s.zone, goal_zone=s.goal_zone, attack_type=s.attack_type, assisted=s.assisted,
+            majority=s.majority, minority=s.minority,
         ))
     game.shots_imported = True
 

@@ -9,8 +9,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
@@ -23,7 +23,7 @@ from . import importer, strategies, xg
 from .db import SessionLocal, get_session, init_db
 from . import __version__
 from .legacy import LEGACY_NAMES
-from .config import AUTO_IMPORT_HOURS, DATA_DIR, ODDSPAPI_KEY, ODDSPAPI_SYNC_HOURS
+from .config import AUTO_IMPORT_HOURS, DATA_DIR, ODDSPAPI_KEY, ODDSPAPI_SYNC_HOURS, VERIFY_MINUTES
 from . import auto_import
 from . import oddspapi_sync
 from .sources import oddspapi as oddspapi_source
@@ -31,6 +31,38 @@ from .models import Competition, Game, GameLine, Shot, Strategy, Team, Aggregate
 from .sources import handballapi
 
 app = FastAPI(title="Handball xG", version=__version__)
+
+from . import auth  # noqa: E402
+app.middleware("http")(auth.middleware)
+
+
+class LoginIn(BaseModel):
+    password: str = Field(max_length=200)
+
+
+@app.get("/api/auth")
+def auth_status(request: Request):
+    """Ob ein Login nötig ist und ob dieser Browser angemeldet ist."""
+    return {"required": auth.enabled(), "logged_in": auth.logged_in(request)}
+
+
+@app.post("/api/login")
+def login(body: LoginIn, request: Request):
+    ip = auth.client_ip(request)
+    if auth.blocked(ip):
+        raise HTTPException(429, "Zu viele Fehlversuche – bitte 15 Minuten warten.")
+    if not auth.enabled() or not auth.check_password(ip, body.password):
+        raise HTTPException(401, "Passwort falsch")
+    response = JSONResponse({"ok": True})
+    auth.set_cookie(response, request)
+    return response
+
+
+@app.post("/api/logout")
+def logout():
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(auth.COOKIE)
+    return response
 
 
 @app.on_event("startup")
@@ -41,13 +73,29 @@ def startup():
     if ODDSPAPI_KEY:
         oddspapi_sync.start_scheduler(SessionLocal, ODDSPAPI_SYNC_HOURS)
     auto_import.start_scheduler(SessionLocal, AUTO_IMPORT_HOURS)
+    threading.Thread(target=_warm_caches, daemon=True).start()
+    from . import verify
+    verify.start_scheduler(SessionLocal, VERIFY_MINUTES)
+
+
+def _warm_caches():
+    """Werte aller Spiele, Fehlerliste und xG-Summen nach dem Start vorrechnen, damit der erste Backtest nicht lange wartet."""
+    try:
+        from . import data_checks
+        with SessionLocal() as s:
+            feat.cached_all_game_features(s)
+            data_checks.error_game_ids(s)
+            _xg_sums(s)
+            strategies_stats(s)
+    except Exception:  # nur Vorwärmen – Fehler zeigen sich beim normalen Aufruf
+        pass
 
 
 # ---------- Hilfsfunktionen ----------
 
 def _selected_rows(session, ids):
     selected = {int(cid) for cid in ids if str(cid).strip()}
-    return [r for r in feat.all_game_features(session) if r["game"].competition_id in selected]
+    return [r for r in feat.cached_all_game_features(session) if r["game"].competition_id in selected]
 
 
 def _available_mean(values):
@@ -84,7 +132,18 @@ def game_dict(g: Game, xg_sums: dict | None = None, features: dict | None = None
     return d
 
 
+_XG_SUMS_CACHE: dict = {}
+
+
 def _xg_sums(session: Session) -> dict:
+    """xG-Summe je (Spiel, Heim?); zwischengespeichert, solange sich die Daten nicht ändern (Berechnung dauert Sekunden)."""
+    key = (id(session.get_bind()), feat._fingerprint(session))
+    if _XG_SUMS_CACHE.get("key") != key:
+        _XG_SUMS_CACHE.update(key=key, sums=_compute_xg_sums(session))
+    return _XG_SUMS_CACHE["sums"]
+
+
+def _compute_xg_sums(session: Session) -> dict:
     rows = session.execute(select(Shot.game_id, Shot.is_home, Shot.xg)).all()
     sums: dict = defaultdict(float)
     for gid, home, x in rows:
@@ -267,11 +326,20 @@ def export_games(competition_id: int | None = None, stage: str = "", session: Se
                     media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
+@app.get("/api/games/{game_id}/lineup")
+def game_lineup(game_id: int, session: Session = Depends(get_session)):
+    """Spieler beider Teams mit Ø xG, Ø Toren und Anteil am Team-xG aus früheren Spielen (für „Aufstellung prüfen“)."""
+    from . import lineup
+    g = session.get(Game, game_id) or _404()
+    return _round_all({"home": lineup.team_players(session, g, g.home_team_id),
+                       "away": lineup.team_players(session, g, g.away_team_id)}, 3)
+
+
 @app.get("/api/games/{game_id}")
 def get_game(game_id: int, session: Session = Depends(get_session)):
     g = session.get(Game, game_id) or _404()
-    rows = feat.all_game_features(session, g.competition_id)
-    f = next((r["features"] for r in rows if r["game"].id == game_id), {})
+    # zwischengespeicherte Werte aller Spiele (gleiche Zahlen wie die Berechnung nur für diesen Wettbewerb, aber sofort)
+    f = next((r["features"] for r in feat.cached_all_game_features(session) if r["game"].id == game_id), {})
     shots = session.scalars(select(Shot).where(Shot.game_id == game_id).order_by(Shot.period, Shot.minute)).all()
     d = game_dict(g, _xg_sums(session), f)
     d["shots"] = [{
@@ -529,12 +597,13 @@ def fetch_odds(body: OddsFetchIn, session: Session = Depends(get_session)):
 @app.get("/api/meta")
 def meta():
     from .metric_docs import metric_docs
-    return {"version": __version__, "features": feat.FEATURES, "markets": strategies.MARKETS, "ops": list(strategies.OPS),
-            "legacy_names": LEGACY_NAMES, "feature_details": metric_docs()}
+    return {"version": __version__, "features": {**feat.FEATURES, **feat.alt_names()}, "markets": strategies.MARKETS, "ops": list(strategies.OPS),
+            "legacy_names": LEGACY_NAMES, "feature_details": metric_docs(),
+            "line_ranges": strategies.LINE_RANGES, "odds_ranges": strategies.ODDS_RANGES, "hdp_ranges": strategies.HDP_RANGES}
 
 
 # Namen, die in Regeln und Formeln vorkommen dürfen
-KNOWN_NAMES = set(feat.FEATURES) | set(LEGACY_NAMES) | {"hdp_line", "odds_draw", "odds_under"}
+KNOWN_NAMES = set(feat.FEATURES) | set(LEGACY_NAMES) | set(feat.alt_names()) | {"hdp_line", "odds_draw", "odds_under", "league"}
 
 
 def _check_rules(rules: list[dict]):
@@ -556,7 +625,7 @@ class StrategyIn(BaseModel):
 
     @model_validator(mode="after")
     def check_settings(self):
-        if self.market not in {*strategies.MARKETS, "hdp_home", "hdp_away"}:
+        if self.market not in strategies.MARKETS:
             raise ValueError("Unbekannter Wettmarkt")
         if self.min_games < 0:
             raise ValueError("Mindestanzahl Spiele muss mindestens 0 sein")
@@ -567,7 +636,8 @@ class StrategyIn(BaseModel):
 
 def _bt_payload(result: dict, sums) -> dict:
     return {
-        **{k: (_num(v, 3) if isinstance(v, float) else v) for k, v in result.items() if k not in ("details", "open")},
+        **{k: (_num(v, 3) if isinstance(v, float) else v) for k, v in result.items() if k not in ("details", "open", "by_season")},
+        "by_season": [{k: (_num(v, 3) if isinstance(v, float) else v) for k, v in s.items()} for s in result["by_season"]],
         "details": [{**game_dict(b["row"]["game"], sums, b["row"]["features"]), "result": b["result"],
                      "odds": b["odds"], "profit": _num(b["profit"])} for b in result["details"]],
         "open": [game_dict(r["game"], sums, r["features"]) for r in result["open"]],
@@ -576,13 +646,67 @@ def _bt_payload(result: dict, sums) -> dict:
 
 @app.post("/api/strategies/backtest")
 def backtest(body: StrategyIn, competition_id: int | None = None, competition_ids: str | None = None,
-             session: Session = Depends(get_session)):
+             exclude_errors: bool = False, session: Session = Depends(get_session)):
     _check_rules(body.rules)
     if competition_ids:
         rows = _selected_rows(session, competition_ids.split(","))
     else:
         rows = feat.all_game_features(session, competition_id)
+    if exclude_errors:
+        from . import data_checks
+        bad = data_checks.error_game_ids(session)
+        rows = [r for r in rows if r["game"].id not in bad]
     return _bt_payload(strategies.backtest(Strategy(**body.model_dump()), rows), _xg_sums(session))
+
+
+class ImpactIn(BaseModel):
+    strategy: StrategyIn
+    competition_ids: list[int]
+    exclude_errors: bool = True
+    market: str | None = None
+    bins: int = Field(15, ge=2, le=40)
+    mode: str = Field("width", pattern="^(width|count)$")
+
+
+@app.post("/api/strategies/metric-impact")
+def strategy_metric_impact(body: ImpactIn, session: Session = Depends(get_session)):
+    """Für die Spiele der Strategie: jede Metrik in Klassen geteilt, je Klasse Wetten und Profit (wie pd.cut im Notebook)."""
+    from . import data_checks
+    _check_rules(body.strategy.rules)
+    if body.market and body.market not in strategies.MARKETS:
+        raise HTTPException(422, f"Unbekannter Markt: {body.market}")
+    rows = _selected_rows(session, body.competition_ids)
+    if body.exclude_errors:
+        bad = data_checks.error_game_ids(session)
+        rows = [r for r in rows if r["game"].id not in bad]
+    # Nur Metriken, die laut Beschreibung vor dem Spiel feststehen (frühere Spiele, Quoten/Linien vor Anpfiff)
+    from .metric_docs import metric_docs
+    docs = metric_docs()
+    names = [n for n in dict.fromkeys([*feat.FEATURES, *LEGACY_NAMES, *feat.alt_names()]) if docs.get(n, {}).get("timing")]
+    res = strategies.metric_impact(Strategy(**body.strategy.model_dump()), rows, names, body.market, body.bins, body.mode)
+    return _round_all(res, 4)
+
+
+class BreakdownIn(BaseModel):
+    strategy: StrategyIn
+    competition_ids: list[int]
+    exclude_errors: bool = True
+    line_ranges: list[tuple[float, float]] = Field(default_factory=lambda: list(strategies.LINE_RANGES), min_length=1, max_length=30)
+    odds_ranges: list[tuple[float, float]] = Field(default_factory=lambda: list(strategies.ODDS_RANGES), min_length=1, max_length=30)
+    hdp_ranges: list[tuple[float, float]] = Field(default_factory=lambda: list(strategies.HDP_RANGES), min_length=1, max_length=30)
+
+
+@app.post("/api/strategies/breakdown")
+def strategy_breakdown(body: BreakdownIn, session: Session = Depends(get_session)):
+    """Spiele der Strategie nach Over-Linie und Quoten aufgeteilt, mit dem Ergebnis jedes Marktes."""
+    from . import data_checks
+    _check_rules(body.strategy.rules)
+    rows = _selected_rows(session, body.competition_ids)
+    if body.exclude_errors:
+        bad = data_checks.error_game_ids(session)
+        rows = [r for r in rows if r["game"].id not in bad]
+    res = strategies.breakdown(Strategy(**body.strategy.model_dump()), rows, body.line_ranges, body.odds_ranges, body.hdp_ranges)
+    return _round_all(res, 3)
 
 
 @app.get("/api/strategies/summary")
@@ -590,7 +714,7 @@ def strategies_summary(competition_ids: str, session: Session = Depends(get_sess
     """Backtest aller gespeicherten Strategien über mehrere Wettbewerbe (z. B. „6597,7284“)."""
     rows = _selected_rows(session, competition_ids.split(","))
     out = []
-    for s in session.scalars(select(Strategy)).all():
+    for s in session.scalars(select(Strategy).where(Strategy.archived.isnot(True))).all():
         try:
             r = strategies.backtest(s, rows)
         except strategies.FormulaError as ex:
@@ -599,17 +723,112 @@ def strategies_summary(competition_ids: str, session: Session = Depends(get_sess
         out.append({
             "id": s.id, "name": s.name, "market": s.market, "bets": r["bets"], "wins": r["wins"],
             "pushes": r["pushes"], "hit_rate": _num(r["hit_rate"], 3), "profit": _num(r["profit"]),
-            "roi": _num(r["roi"], 3), "open": len(r["open"]),
+            "roi": _num(r["roi"], 3), "roi_low": _num(r["roi_low"], 3), "roi_high": _num(r["roi_high"], 3),
+            "open": len(r["open"]),
             "stake": r["stake"], "total_staked": r["total_staked"], "avg_odds": _num(r["avg_odds"]),
         })
     return out
 
 
+class StrategyRateIn(BaseModel):
+    competition_ids: list[int]
+    exclude_errors: bool = True
+    test_season: str | None = None
+
+
+@app.post("/api/strategies/rate")
+def strategies_rate(body: StrategyRateIn, session: Session = Depends(get_session)):
+    """Alle Strategien mit Ampel: Lern-Saisons gegen Prüf-Saison (Standard: die neueste Saison mit Wetten)."""
+    from . import data_checks
+    rows = _selected_rows(session, body.competition_ids)
+    if body.exclude_errors:
+        bad = data_checks.error_game_ids(session)
+        rows = [r for r in rows if r["game"].id not in bad]
+    seasons = sorted({strategies.season_of(r["game"]) for r in rows if r["game"].finished and r["game"].line},
+                     key=strategies.season_order)
+    test_season = body.test_season if body.test_season in seasons else (seasons[-1] if len(seasons) > 1 else None)
+
+    def short(x):
+        return None if x is None else {k: _num(x[k], 3) for k in ("bets", "hit_rate", "profit", "roi", "roi_low", "roi_high", "avg_odds")}
+
+    out = []
+    order = {"green": 0, "yellow": 1, "red": 2, "grey": 3}
+    for s in session.scalars(select(Strategy).where(Strategy.archived.isnot(True))).all():
+        try:
+            r = strategies.backtest(s, rows)
+        except strategies.FormulaError as ex:
+            out.append({"id": s.id, "name": s.name, "market": s.market, "error": str(ex), "light": "grey", "light_reason": str(ex)})
+            continue
+        rated = strategies.rate(r["details"], r["stake"], test_season)
+        out.append({"id": s.id, "name": s.name, "market": s.market, "rules": len(s.rules or []), "open": len(r["open"]),
+                    "stake": r["stake"], "total": short(rated["total"]), "train": short(rated["train"]),
+                    "test": short(rated["test"]), "light": rated["light"], "light_reason": rated["light_reason"]})
+    out.sort(key=lambda x: (order[x["light"]], -((x.get("total") or {}).get("roi") or -9)))
+    return {"seasons": seasons, "test_season": test_season, "games": len(rows), "strategies": out}
+
+
 @app.get("/api/strategies")
 def list_strategies(session: Session = Depends(get_session)):
     return [{"id": s.id, "name": s.name, "market": s.market, "rules": s.rules, "min_games": s.min_games, "notes": s.notes,
-             "min_odds": s.min_odds, "max_odds": s.max_odds, "stake": s.stake or 1.0}
+             "min_odds": s.min_odds, "max_odds": s.max_odds, "stake": s.stake or 1.0, "archived": bool(s.archived)}
             for s in session.scalars(select(Strategy)).all()]
+
+
+_STATS_CACHE: dict = {"rows": None, "bad": None, "by_key": {}}
+_STATS_LOCK = threading.Lock()
+
+
+@app.get("/api/strategies/stats")
+def strategies_stats(session: Session = Depends(get_session)):
+    """Wetten und Profit jeder Strategie (auch archivierte) über alle beendeten Spiele ohne Datenfehler.
+
+    Zwischengespeichert je Strategie-Einstellung, solange sich die Spieldaten nicht ändern."""
+    with _STATS_LOCK:  # gleichzeitige Aufrufe rechnen nicht doppelt
+        return _strategies_stats(session)
+
+
+def _strategies_stats(session: Session) -> dict:
+    import json
+    from . import data_checks
+    rows = feat.cached_all_game_features(session)
+    if _STATS_CACHE["rows"] is not rows:
+        bad = data_checks.error_game_ids(session)
+        _STATS_CACHE.update(rows=rows, filtered=[r for r in rows if r["game"].id not in bad], by_key={})
+    filtered, cache = _STATS_CACHE["filtered"], _STATS_CACHE["by_key"]
+    out = {}
+    for s in session.scalars(select(Strategy)).all():
+        key = json.dumps([s.market, s.rules, s.min_games, s.min_odds, s.max_odds, s.stake], sort_keys=True, default=str)
+        if key not in cache:
+            try:
+                r = strategies.backtest(s, filtered)
+                cache[key] = {"bets": r["bets"], "profit": _num(r["profit"]), "roi": _num(r["roi"], 3)}
+            except strategies.FormulaError:
+                cache[key] = {"bets": 0, "profit": None, "roi": None}
+        out[s.id] = cache[key]
+    return out
+
+
+class ArchiveIn(BaseModel):
+    ids: list[int]
+    archived: bool = True
+
+
+@app.post("/api/strategies/archive")
+def archive_strategies(body: ArchiveIn, session: Session = Depends(get_session)):
+    """Strategien archivieren bzw. zurückholen. Offene Tipps archivierter Strategien fallen weg, beendete bleiben."""
+    from .models import StrategyPick
+    found = session.scalars(select(Strategy).where(Strategy.id.in_(body.ids))).all()
+    for s in found:
+        s.archived = body.archived
+    removed = 0
+    if body.archived and found:
+        open_picks = session.scalars(select(StrategyPick).join(Game, StrategyPick.game_id == Game.id).where(
+            StrategyPick.strategy_id.in_([s.id for s in found]), Game.finished.is_(False))).all()
+        for p in open_picks:
+            session.delete(p)
+        removed = len(open_picks)
+    session.commit()
+    return {"changed": len(found), "open_picks_removed": removed}
 
 
 @app.post("/api/strategies")
@@ -639,10 +858,53 @@ def delete_strategy(sid: int, session: Session = Depends(get_session)):
     return {"ok": True}
 
 
+# ---------- Verifikator: Strategien ab jetzt mitlaufen lassen ----------
+
+@app.get("/api/verify")
+def verify_overview(session: Session = Depends(get_session)):
+    from . import verify
+    return {"status": verify.STATUS, "strategies": _round_all(verify.overview(session), 4)}
+
+
+@app.post("/api/verify/refresh")
+def verify_refresh(session: Session = Depends(get_session)):
+    """Tipps für kommende Spiele sofort festhalten (läuft sonst alle 20 Minuten im Hintergrund)."""
+    from . import verify
+    return verify.record_picks(session)
+
+
+@app.get("/api/verify/games")
+def verify_games(strategy_id: int | None = None, session: Session = Depends(get_session)):
+    """Beendete Spiele mit abgerechneten Tipps (aller oder einer Strategie)."""
+    from . import verify
+    return _round_all(verify.settled_games(session, strategy_id), 4)
+
+
+@app.get("/api/verify/games/{gid}")
+def verify_game_metrics(gid: int, session: Session = Depends(get_session)):
+    """Alle Metriken und Quoten eines Spiels, gruppiert, mit den Tipps darauf."""
+    from . import verify
+    return _round_all(verify.game_metrics(session, gid) or _404(), 4)
+
+
+@app.get("/api/verify/{sid}")
+def verify_detail(sid: int, session: Session = Depends(get_session)):
+    from . import verify
+    return _round_all(verify.detail(session, sid) or _404(), 4)
+
+
 @app.get("/api/predictions")
-def predictions(competition_id: int | None = None, session: Session = Depends(get_session)):
-    rows = feat.all_game_features(session, competition_id)
-    strats = session.scalars(select(Strategy)).all()
+def predictions(competition_id: int | None = None, days: int | None = Query(default=None, ge=1, le=14),
+                session: Session = Depends(get_session)):
+    """Offene Spiele mit Prognose. ``days``: alle Wettbewerbe, nur Spiele von heute bis heute + days − 1 (Moskauer Zeit)."""
+    if days:
+        from datetime import datetime, timedelta, timezone
+        today = (datetime.now(timezone.utc) + timedelta(hours=3)).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
+        end = today + timedelta(days=days)
+        rows = [r for r in feat.cached_all_game_features(session) if today <= r["game"].start_moscow < end]
+    else:
+        rows = feat.all_game_features(session, competition_id)
+    strats = session.scalars(select(Strategy).where(Strategy.archived.isnot(True))).all()
     sums = _xg_sums(session)
     out = []
     for r in rows:
@@ -674,6 +936,311 @@ def metric_analysis(body: AnalysisIn, competition_ids: str, session: Session = D
              if r["game"].finished and r["features"].get("over_line") is not None]
     result["available_lines"] = {"min": min(lines) if lines else None, "max": max(lines) if lines else None, "games": len(lines)}
     return result
+
+
+# ---------- Modell-Auswertung, Datenprüfung, Wettbuch, Value-Liste ----------
+
+def _team_names(g) -> dict:
+    return {"id": g.id, "competition_id": g.competition_id, "competition": g.competition.name,
+            "start": g.start_moscow.isoformat(), "home": g.home_team.name, "away": g.away_team.name,
+            "home_score": g.home_score, "away_score": g.away_score, "finished": g.finished}
+
+
+def _round_all(obj, digits=3):
+    if isinstance(obj, float):
+        return round(obj, digits)
+    if isinstance(obj, dict):
+        return {k: _round_all(v, digits) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_round_all(v, digits) for v in obj]
+    return obj
+
+
+_EVAL_CACHE: dict = {}
+
+
+@app.get("/api/evaluation")
+def model_evaluation(exclude_errors: bool = True, session: Session = Depends(get_session)):
+    """Faire Linie gegen Markt: Genauigkeit, Kalibrierung, Value-Wetten mit ROI-Intervall je Saison, CLV."""
+    from . import data_checks, evaluation, fair_line
+    from .pregame import league_key
+    rows = feat.cached_all_game_features(session)
+    key = (id(rows), exclude_errors)
+    if _EVAL_CACHE.get("key") != key:
+        if exclude_errors:
+            bad = data_checks.error_game_ids(session)
+            rows = [r for r in rows if r["game"].id not in bad]
+        result = evaluation.evaluate(rows, lambda g: league_key(g.competition))
+        _EVAL_CACHE.update(key=key, result=_round_all({
+            **result, "model_weight": fair_line.MODEL_WEIGHT,
+            "max_odds": evaluation.MAX_ODDS, "excluded_errors": exclude_errors}))
+    return _EVAL_CACHE["result"]
+
+
+@app.get("/api/data-checks")
+def data_checks_list(competition_id: int | None = None, session: Session = Depends(get_session)):
+    from . import data_checks
+    entries = data_checks.run_checks(session, competition_id)
+    games = {g.id: g for g in session.scalars(select(Game).where(Game.id.in_({e["game_id"] for e in entries}))).unique()}
+    return {"checks": [{"key": k, "label": v, "severity": data_checks.SEVERITY[k]} for k, v in data_checks.CHECKS.items()],
+            "entries": [{**e, "game": _team_names(games[e["game_id"]])} for e in entries if e["game_id"] in games]}
+
+
+_AUDIT_CACHE: dict = {}
+
+
+@app.get("/api/metric-audit")
+def metric_audit_run(session: Session = Depends(get_session)):
+    """Alle Vor-Spiel-Metriken unabhängig nachrechnen (dauert etwa 20 Sekunden, Ergebnis zwischengespeichert)."""
+    from . import metric_audit
+    rows = feat.cached_all_game_features(session)
+    if _AUDIT_CACHE.get("rows") is not rows:
+        _AUDIT_CACHE.update(rows=rows, result=metric_audit.run_audit(session, rows))
+    return _AUDIT_CACHE["result"]
+
+
+@app.get("/api/metric-audit/team")
+def metric_audit_team(competition_id: int, team_id: int, session: Session = Depends(get_session)):
+    from . import metric_audit
+    out = metric_audit.team_history(session, competition_id, team_id, feat.cached_all_game_features(session))
+    if out is None:
+        raise HTTPException(404, "Wettbewerb nicht gefunden")
+    return out
+
+
+class BettingSettingsIn(BaseModel):
+    bankroll: float | None = Field(default=None, gt=0)
+    kelly_fraction: float | None = Field(default=None, gt=0, le=1)
+    min_ev: float | None = Field(default=None, ge=-0.5, le=1)
+    max_odds: float | None = Field(default=None, gt=1)
+    max_stake_pct: float | None = Field(default=None, gt=0, le=1)
+
+
+@app.get("/api/betting/settings")
+def betting_settings(session: Session = Depends(get_session)):
+    from . import betting
+    return betting.get_settings(session)
+
+
+@app.put("/api/betting/settings")
+def update_betting_settings(body: BettingSettingsIn, session: Session = Depends(get_session)):
+    from . import betting
+    return betting.set_settings(session, body.model_dump())
+
+
+@app.get("/api/value-bets")
+def value_bets(days: float = 3, session: Session = Depends(get_session)):
+    """Offene Spiele der nächsten Tage mit positivem Erwartungswert und Kelly-Einsatz."""
+    from . import betting
+    settings = betting.get_settings(session)
+    items = betting.value_list(feat.cached_all_game_features(session), settings, days)
+    return {"settings": settings, "items": [_round_all({
+        "game": _team_names(v["game"]), "market": v["market"], "line": v["line"], "odds": v["odds"],
+        "ev": v["ev"], "prob": v["prob"], "push": v["push"], "fair_odds": v["fair_odds"],
+        "market_prob": v["market_prob"], "model_prob": v["model_prob"], "kelly": v["kelly"], "stake": v["stake"],
+        "fair_total": v["features"].get("fair_total"), "fair_margin": v["features"].get("fair_margin"),
+        "hdp_line": v["features"].get("hdp_line"),
+    }) for v in items]}
+
+
+class BetIn(BaseModel):
+    game_id: int
+    market: str
+    line: float | None = None
+    odds: float = Field(gt=1)
+    stake: float = Field(gt=0)
+    bookmaker: str | None = None
+    model_prob: float | None = None
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def check_market(self):
+        if self.market not in ("over", "under", "home", "draw", "away", "hdp_home", "hdp_away"):
+            raise ValueError("Unbekannter Wettmarkt")
+        if self.market in ("over", "under", "hdp_home", "hdp_away") and self.line is None:
+            raise ValueError("Für Over/Under und Handicap braucht es die Linie")
+        return self
+
+
+@app.get("/api/bets")
+def list_bets(session: Session = Depends(get_session)):
+    from . import betting
+    rows, summary = betting.bet_rows(session)
+    return {"summary": _round_all(summary), "bets": [_round_all({
+        "id": r["bet"].id, "market": r["bet"].market, "line": r["bet"].line, "odds": r["bet"].odds,
+        "stake": r["bet"].stake, "bookmaker": r["bet"].bookmaker, "placed_at": r["bet"].placed_at.isoformat(),
+        "model_prob": r["bet"].model_prob, "notes": r["bet"].notes, "result": r["result"], "profit": r["profit"],
+        "clv": r["clv"], "game": _team_names(r["game"]),
+    }) for r in rows]}
+
+
+@app.post("/api/bets")
+def create_bet(body: BetIn, session: Session = Depends(get_session)):
+    from .models import Bet
+    if not session.get(Game, body.game_id):
+        _404()
+    bet = Bet(**body.model_dump())
+    session.add(bet)
+    session.commit()
+    return {"id": bet.id}
+
+
+@app.delete("/api/bets/{bet_id}")
+def delete_bet(bet_id: int, session: Session = Depends(get_session)):
+    from .models import Bet
+    bet = session.get(Bet, bet_id)
+    if not bet:
+        _404()
+    session.delete(bet)
+    session.commit()
+    return {"ok": True}
+
+
+class CustomPredictor(BaseModel):
+    target: str
+    name: str = Field(min_length=1, max_length=60)
+    formula: str = Field(min_length=1, max_length=400)
+
+
+class GoalCorrelationIn(BaseModel):
+    competition_ids: list[int]
+    exclude_errors: bool = True
+    target: str | None = None
+    key: str | None = None
+    custom: list[CustomPredictor] = []
+
+
+class GoalTableIn(BaseModel):
+    competition_ids: list[int]
+    exclude_errors: bool = True
+    target: str = "total"
+    formula: str = Field(min_length=1, max_length=400)
+    min_games: int = Field(default=0, ge=0, le=100)
+
+
+@app.post("/api/goal-correlation/games")
+def goal_correlation_games(body: GoalTableIn, session: Session = Depends(get_session)):
+    """Je Spiel erzielte Tore, eigene Metrik (Formel) und Over-Linie bzw. Buchmacher-Wert, mit Korrelationen."""
+    from . import data_checks
+    from . import goal_correlation as gc
+    if not body.competition_ids:
+        raise HTTPException(400, "Bitte mindestens eine Saison wählen")
+    if body.target not in gc.TARGETS:
+        raise HTTPException(400, f"Unbekanntes Ziel: {body.target}")
+    try:
+        unknown = strategies.expression_names(body.formula) - (KNOWN_NAMES | set(gc.EXTRA_NAMES))
+    except strategies.FormulaError as ex:
+        raise HTTPException(400, str(ex))
+    if unknown:
+        raise HTTPException(400, f"Unbekannte Namen: {', '.join(sorted(unknown))}")
+    rows = _selected_rows(session, body.competition_ids)
+    excluded = 0
+    if body.exclude_errors:
+        bad = data_checks.error_game_ids(session)
+        excluded = sum(r["game"].id in bad and r["game"].finished for r in rows)
+        rows = [r for r in rows if r["game"].id not in bad]
+    return _round_all({**gc.game_table(rows, body.target, body.formula, body.min_games), "excluded_errors": excluded}, 3)
+
+
+class NamedFormula(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    formula: str = Field(min_length=1, max_length=400)
+
+
+class GoalCompareIn(BaseModel):
+    competition_ids: list[int]
+    exclude_errors: bool = True
+    target: str = "total"
+    min_games: int = Field(default=0, ge=0, le=100)
+    formulas: list[NamedFormula] = Field(min_length=1, max_length=12)
+    split: bool = False
+
+
+@app.post("/api/goal-correlation/compare")
+def goal_correlation_compare(body: GoalCompareIn, session: Session = Depends(get_session)):
+    """Mehrere Metriken und Over-Linie bzw. Buchmacher nebeneinander, optional aufgeteilt nach Geschlecht und Land."""
+    from . import data_checks
+    from . import goal_correlation as gc
+    if not body.competition_ids:
+        raise HTTPException(400, "Bitte mindestens eine Saison wählen")
+    if body.target not in gc.TARGETS:
+        raise HTTPException(400, f"Unbekanntes Ziel: {body.target}")
+    for m in body.formulas:
+        try:
+            unknown = strategies.expression_names(m.formula) - (KNOWN_NAMES | set(gc.EXTRA_NAMES))
+        except strategies.FormulaError as ex:
+            raise HTTPException(400, f"{m.name}: {ex}")
+        if unknown:
+            raise HTTPException(400, f"{m.name}: unbekannte Namen {', '.join(sorted(unknown))}")
+    rows = _selected_rows(session, body.competition_ids)
+    if body.exclude_errors:
+        bad = data_checks.error_game_ids(session)
+        rows = [r for r in rows if r["game"].id not in bad]
+    return _round_all(gc.compare_metrics(rows, body.target, [m.model_dump() for m in body.formulas],
+                                         body.min_games, body.split), 3)
+
+
+@app.get("/api/goal-correlation/names")
+def goal_correlation_names():
+    """Namen, die in eigenen Formeln erlaubt sind, mit Beschreibung."""
+    from .goal_correlation import EXTRA_NAMES
+    return {**{k: v for k, v in feat.FEATURES.items()}, **{k: k for k in LEGACY_NAMES}, **feat.alt_names(), **EXTRA_NAMES}
+
+
+class GoalRankIn(BaseModel):
+    competition_ids: list[int]
+    exclude_errors: bool = True
+    target: str = "total"
+    min_games: int = Field(default=0, ge=0, le=100)
+    by_min_games: bool = False
+    group: str = "Alle gewählten Spiele"
+    by_league: bool = False
+    test_season: str | None = None
+
+
+@app.post("/api/goal-correlation/rank")
+def goal_correlation_rank(body: GoalRankIn, session: Session = Depends(get_session)):
+    """Alle Metriken nach Korrelation mit dem Ergebnis, jeweils fair gegen die Over-Linie bzw. den Buchmacher."""
+    from . import data_checks
+    from . import goal_correlation as gc
+    if not body.competition_ids:
+        raise HTTPException(400, "Bitte mindestens eine Saison wählen")
+    if body.target not in gc.TARGETS:
+        raise HTTPException(400, f"Unbekanntes Ziel: {body.target}")
+    rows = _selected_rows(session, body.competition_ids)
+    if body.exclude_errors:
+        bad = data_checks.error_game_ids(session)
+        rows = [r for r in rows if r["game"].id not in bad]
+    return _round_all(gc.rank_metrics(rows, body.target, goal_correlation_names(), body.min_games, body.by_min_games,
+                                       body.group, body.by_league, body.test_season), 3)
+
+
+@app.post("/api/goal-correlation")
+def goal_correlation(body: GoalCorrelationIn, session: Session = Depends(get_session)):
+    """Vor-Spiel-Werte, eigene Formeln und Buchmacher-Erwartung gegen erzielte Tore (Heim, Gast, gesamt, Differenz)."""
+    from . import data_checks
+    from . import goal_correlation as gc
+    if not body.competition_ids:
+        raise HTTPException(400, "Bitte mindestens eine Saison wählen")
+    allowed = KNOWN_NAMES | set(gc.EXTRA_NAMES)
+    for c in body.custom:
+        if c.target not in gc.TARGETS:
+            raise HTTPException(400, f"Unbekanntes Ziel: {c.target}")
+        try:
+            unknown = strategies.expression_names(c.formula) - allowed
+        except strategies.FormulaError as ex:
+            raise HTTPException(400, f"{c.name}: {ex}")
+        if unknown:
+            raise HTTPException(400, f"{c.name}: unbekannte Namen {', '.join(sorted(unknown))}")
+    rows = _selected_rows(session, body.competition_ids)
+    excluded = 0
+    if body.exclude_errors:
+        bad = data_checks.error_game_ids(session)
+        excluded = sum(r["game"].id in bad and r["game"].finished for r in rows)
+        rows = [r for r in rows if r["game"].id not in bad]
+    result = gc.analyze(rows, (body.target, body.key) if body.target and body.key else None,
+                        custom=[c.model_dump() for c in body.custom])
+    return _round_all({**result, "excluded_errors": excluded}, 4)
 
 
 # ---------- Gebaute Oberfläche (frontend/dist) ausliefern ----------

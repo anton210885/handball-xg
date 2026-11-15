@@ -16,7 +16,7 @@ def strategy():
 
 
 def test_draw_and_five_markets():
-    assert set(strategies.MARKETS) == {'home','draw','away','over','under'}
+    assert set(strategies.MARKETS) == {'home','draw','away','over','under','hdp_home','hdp_away'}
     g=SimpleNamespace(finished=True, home_score=30, away_score=30)
     assert strategies.settle('draw',g,{'odds_draw':8}) == ('win',8)
     assert strategies.settle('home',g,{'odds_home':2}) == ('loss',2)

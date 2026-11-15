@@ -27,6 +27,7 @@ export const OUTCOME_LABEL: Record<string, string> = {
   goal: "Tor",
   save: "Parade",
   miss: "Vorbei",
+  missed: "Fehlwurf", // HBL: gehalten oder vorbei, die Quelle unterscheidet das nicht
   post: "Pfosten",
   block: "Block",
   error: "Fehler",

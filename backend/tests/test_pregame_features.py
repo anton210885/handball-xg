@@ -63,14 +63,22 @@ def test_same_day_games_are_not_known_before_kickoff(db):
     assert a['home_games']==1
 
 
-def test_xg_training_is_separate_by_gender_and_league(db):
+def test_other_leagues_are_only_the_starting_value(db):
     game(db,1,0);game(db,2,2)
     before=features(db,2)
     db.add_all([Competition(id=2,name='League Frauen – Vorrunde',season='24/25',gender='women'),
                 Competition(id=3,name='Different Männer – Vorrunde',season='24/25',gender='men')]);db.flush()
     game(db,3,-10,comp=2,home=3,away=4,goal=False)
     game(db,4,-9,comp=3,home=3,away=4,goal=False)
-    assert features(db,2)==before
+    after=features(db,2)
+    assert after['home_avg_xg_alt']==before['home_avg_xg']  # alte Berechnung: andere Ligen zählen nicht
+    assert 'home_avg_goals_alt' not in after and 'pred_total_goals_alt' not in after
+    # Ohne eigene Würfe startet die Liga bei den anderen Ligen (dort nur Fehlwürfe) …
+    assert after['home_avg_xg']<before['home_avg_xg']
+    # … und spätere Spiele der anderen Ligen ändern nichts
+    game(db,5,5,comp=2,home=3,away=4,goal=True)
+    game(db,6,6,comp=3,home=3,away=4,goal=True)
+    assert features(db,2)==after
 
 
 def test_prior_history_must_be_before_game_and_same_group(db):
@@ -109,7 +117,8 @@ def test_all_competitions_preserve_season_scope_and_gender(db):
 
 def test_every_allowed_feature_has_documentation_and_outcomes_are_blocked():
     docs=metric_docs()
-    assert set(docs)==set(FEATURES)|set(LEGACY_NAMES)
+    from app.features import alt_names
+    assert set(docs)==set(FEATURES)|set(LEGACY_NAMES)|set(alt_names())
     assert all(all(d[field] for field in ['description','formula','source','timing']) for d in docs.values())
     for name in ['home_score','away_score','home_ht','away_ht','Home_Goal','profit','result','home_xg']:
         with pytest.raises(FormulaError):validate_rules([{'feature':name,'op':'>','value':0}],KNOWN_NAMES)
@@ -156,7 +165,7 @@ def test_aggregate_xg_uses_only_earlier_outcomes(db):
     db.add_all([AggregateStat(game_id=2,is_home=True,shots=50,goals=30,source='test'),AggregateStat(game_id=2,is_home=False,shots=40,goals=20,source='test')])
     game(db,3,4);db.flush()
     before=features(db,3)
-    assert before['home_avg_xg']==pytest.approx((25+50*(50+15)/(90+30))/2)
+    assert before['home_avg_xg']==pytest.approx((25+50*(50+300*.5)/(90+300))/2)
     future=game(db,4,10,score=(100,100));future.shots_imported=False;future.stats_imported=True
     db.add_all([AggregateStat(game_id=4,is_home=True,shots=100,goals=100,source='test'),AggregateStat(game_id=4,is_home=False,shots=100,goals=100,source='test')]);db.flush()
     assert features(db,3)==before
@@ -197,3 +206,46 @@ def test_odds_import_fills_gaps_without_overwriting_manual_values(db):
     assert line.odds_home==2
     assert line.over_line==59.5
     assert line.odds_away==2.4
+
+
+def test_league_model_moves_from_prior_to_own_rates():
+    from app.xg import fit_counts
+    from collections import Counter
+    prior=fit_counts(Counter({('line','positional',True):600,('line','positional',False):400,
+                              ('back','positional',True):300,('back','positional',False):700}))
+    assert fit_counts(Counter(),prior=prior).predict('back','positional')==pytest.approx(prior.predict('back','positional'),abs=.01)
+    few=fit_counts(Counter({('back','positional',True):1,('back','positional',False):9}),prior=prior)
+    many=fit_counts(Counter({('back','positional',True):100,('back','positional',False):900}),prior=prior)
+    assert many.predict('back','positional')<few.predict('back','positional')<prior.predict('back','positional')
+    assert many.predict('back','positional')<.2
+    assert 'line' in few.zones  # Zonen ohne eigene Würfe kommen aus dem Vor-Modell
+
+
+def test_over_loss_streak_counts_latest_losses_in_a_row():
+    from types import SimpleNamespace
+    from app.features import _team_form
+
+    def tg(total, line):
+        return SimpleNamespace(goals=total // 2, goals_against=total - total // 2, xg=None, xga=None, attacks=None, over_line=line)
+    # alt → neu: Treffer, ohne Linie, Niederlage, ohne Linie, Niederlage, Niederlage
+    hist = [tg(60, 55.5), tg(50, None), tg(50, 55.5), tg(70, None), tg(52, 55.5), tg(54, 55.5)]
+    assert _team_form(hist)["over_loss_streak"] == 3
+    assert _team_form(hist + [tg(56, 56)])["over_loss_streak"] == 0  # genau die Linie beendet die Serie
+    assert _team_form([tg(50, None)])["over_loss_streak"] is None
+
+
+def test_lineup_players_only_from_earlier_days(db):
+    from app.lineup import team_players
+    for gid, day, names in [(1, 0, ["Anna", "Anna", "Bea"]), (2, 1, ["Anna"]), (3, 2, ["Bea"]), (4, 3, ["Cleo"])]:
+        game(db, gid, day)
+        for i, n in enumerate(names):
+            db.add(Shot(id=gid * 100 + i, game_id=gid, team_id=1, is_home=True, period=1, minute=10, shooter_name=n,
+                        outcome="goal" if i == 0 else "save", court_zone="line", attack_type="positional", xg=0.5))
+    target = game(db, 5, 3, hour=18)  # gleicher Tag wie Spiel 4 → Spiel 4 zählt nicht
+    res = team_players(db, target, 1)
+    assert res["games"] == 3
+    p = {x["name"]: x for x in res["players"]}
+    assert set(p) == {"Anna", "Bea"}          # Cleo warf erst am selben Tag
+    assert p["Anna"]["games"] == 2 and abs(p["Anna"]["xg"] - 1.5) < 1e-9 and p["Anna"]["goals"] == 2
+    assert abs(p["Anna"]["share"] - 0.6) < 1e-9 and abs(p["Bea"]["share"] - 0.4) < 1e-9
+    assert p["Bea"]["last_game"] == 0 and p["Anna"]["last_game"] == -1

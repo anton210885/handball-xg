@@ -14,6 +14,8 @@ Spiele, für die OddsPapi nichts hat, werden markiert und nicht erneut abgefragt
 from __future__ import annotations
 
 import difflib
+import hashlib
+import json
 import logging
 import re
 import threading
@@ -142,6 +144,47 @@ def apply_line(session: Session, game: Game, values: dict, swapped: bool, closin
     return True
 
 
+OPEN_KEYS = ("over_line", "odds_over", "odds_under", "hdp_line", "odds_home", "odds_draw", "odds_away")
+
+
+def apply_opening(game: Game, values: dict, swapped: bool) -> bool:
+    """Eröffnungskurs (erster Preis im Verlauf) neben den Schlusskurs schreiben – nur zu OddsPapi-Linien."""
+    line = game.line
+    if not values or not line or not (line.source or "").startswith("oddspapi"):
+        return False
+    values = dict(values)
+    if swapped:
+        values["odds_home"], values["odds_away"] = values.get("odds_away"), values.get("odds_home")
+        if values.get("hdp_line") is not None:
+            values["hdp_line"] = -values["hdp_line"]
+    for key in OPEN_KEYS:
+        setattr(line, f"open_{key}", values.get(key))
+    return True
+
+
+def backfill_opening(session: Session) -> dict:
+    """Eröffnungskurse aus den zwischengespeicherten /historical-odds-Antworten nachtragen (keine API-Abfrage)."""
+    cache = oddspapi.CACHE_DIR
+    markets_file = cache / "markets_22.json"
+    if not markets_file.exists():
+        return {"updated": 0, "message": "Marktliste fehlt im Zwischenspeicher"}
+    markets = {str(m["marketId"]): m for m in json.loads(markets_file.read_text(encoding="utf-8"))}
+    digest = hashlib.sha256(oddspapi.bookmaker_key(ODDSPAPI_BOOKMAKERS).encode()).hexdigest()[:16]
+    updated = 0
+    games = session.scalars(select(Game).where(Game.oddspapi_fixture_id.is_not(None), Game.finished.is_(True))).unique().all()
+    for g in games:
+        files = sorted(cache.glob(f"hist_{g.oddspapi_fixture_id}_*.json"), key=lambda f: digest not in f.name)
+        if not files or not g.line:
+            continue
+        data = json.loads(files[0].read_text(encoding="utf-8"))
+        if not data:
+            continue
+        values = oddspapi.extract_line(data, markets, _utc(g), opening=True)
+        updated += apply_opening(g, values, _is_swapped(g, data, {}))
+    session.commit()
+    return {"updated": updated, "games": len(games)}
+
+
 # ---------- Abgleich ----------
 
 def _windows(days: list[date]) -> list[tuple[date, date]]:
@@ -235,6 +278,7 @@ def sync_competition(session: Session, comp: Competition, client: oddspapi.OddsP
                 g.oddspapi_status = "none"
                 report["no_data"] += 1
             elif apply_line(session, g, values, sw, closing=True):
+                apply_opening(g, oddspapi.extract_line(data, markets, start, opening=True), sw)
                 g.oddspapi_status = "close"
                 report["closing"] += 1
                 report["no_main_line"] += "over_line" not in values
@@ -307,7 +351,10 @@ def sync_all(session: Session, competition_ids: list[int] | None = None, histori
 
 
 def start_scheduler(session_factory, every_hours: float):
-    """Hintergrund-Thread: gleicht alle x Stunden ab (erster Lauf kurz nach dem Start)."""
+    """Hintergrund-Thread: gleicht alle x Stunden ab (erster Lauf kurz nach dem Start). 0 = aus."""
+    if every_hours <= 0:
+        return
+
     def loop():
         time.sleep(30)
         while True:

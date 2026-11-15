@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { api, Competition } from "./api";
 import ImportPage from "./pages/ImportPage";
 import GamesPage from "./pages/GamesPage";
@@ -8,9 +8,13 @@ import TeamsPage from "./pages/TeamsPage";
 import XgPage from "./pages/XgPage";
 import LinesPage from "./pages/LinesPage";
 import StrategiesPage from "./pages/StrategiesPage";
+import GoalCorrelationPage from "./pages/GoalCorrelationPage";
 import AnalysisPage from "./pages/AnalysisPage";
 import PredictionsPage from "./pages/PredictionsPage";
 import OddsportalPage from "./pages/OddsportalPage";
+import VerifyPage from "./pages/VerifyPage";
+import DataCheckPage from "./pages/DataCheckPage";
+import { useAuth } from "./AuthGate";
 
 type CompCtx = {
   competitions: Competition[];
@@ -41,6 +45,7 @@ export default function App() {
   const [competitionId, setId] = useState<number | undefined>(readStoredId);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState<string | null>(null);
+  const auth = useAuth();
 
   const reload = () =>
     api
@@ -76,16 +81,36 @@ export default function App() {
     ["/spiele", "Spiele"],
     ["/linien", "Linien & Quoten"],
     ["/strategien", "Strategien"],
+    ["/verifikator", "Verifikator"],
     ["/analyse", "Metriken & Profit"],
+    ["/korrelation", "Korrelation Tore"],
     ["/teams", "Teams"],
+    ["/datenpruefung", "Datenprüfung"],
     ["/xg", "xG-Modell"],
     ["/import", "Daten-Import"],
   ];
 
+  // Handy: Menü einklappbar, schließt nach jedem Seitenwechsel
+  const [menuOpen, setMenuOpen] = useState(false);
+  const location = useLocation();
+  useEffect(() => setMenuOpen(false), [location.pathname]);
+  const current = links.find(([to]) => (to === "/" ? location.pathname === "/" : location.pathname.startsWith(to)))?.[1] ?? "";
+  const comp = competitions.find((c) => c.id === competitionId);
+
   return (
     <CompetitionContext.Provider value={{ competitions, competitionId, setCompetitionId, reload }}>
       <div className="layout">
-        <aside className="sidebar">
+        <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
+          <div className="mobile-bar">
+            <button className="menu-btn" aria-label="Menü" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
+              {menuOpen ? "✕" : "☰"}
+            </button>
+            <div className="mobile-title">
+              <b>{current || "Handball xG"}</b>
+              {comp && <span className="muted">{comp.season} · {comp.name}</span>}
+            </div>
+          </div>
+          <div className="sidebar-body">
           <div className="brand">
             Handball xG <small>Statistik · xG · Strategien{version ? ` · v${version}` : ""}</small>
           </div>
@@ -112,7 +137,14 @@ export default function App() {
               ))}
             </select>
           </div>
+          {auth.required && (
+            <div style={{ marginTop: 16, padding: "0 8px" }}>
+              <button className="secondary" style={{ width: "100%" }} onClick={auth.logout}>Abmelden</button>
+            </div>
+          )}
+          </div>
         </aside>
+        {menuOpen && <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />}
         <main className="main">
           {error && <div className="error">{error}</div>}
           <Routes>
@@ -121,8 +153,11 @@ export default function App() {
             <Route path="/spiele/:id" element={<GameDetailPage />} />
             <Route path="/linien" element={<LinesPage />} />
             <Route path="/strategien" element={<StrategiesPage />} />
+            <Route path="/verifikator" element={<VerifyPage />} />
             <Route path="/analyse" element={<AnalysisPage />} />
+            <Route path="/korrelation" element={<GoalCorrelationPage />} />
             <Route path="/teams" element={<TeamsPage />} />
+            <Route path="/datenpruefung" element={<DataCheckPage />} />
             <Route path="/xg" element={<XgPage />} />
             <Route path="/import" element={<ImportPage />} />
             <Route path="/oddsportal" element={<OddsportalPage />} />

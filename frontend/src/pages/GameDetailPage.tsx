@@ -3,6 +3,7 @@ import { api } from "../api";
 import BoxScore from "../components/BoxScore";
 import CourtMap from "../components/CourtMap";
 import GoalMap from "../components/GoalMap";
+import LineupCheck from "../components/LineupCheck";
 import { ATTACK_LABEL, dateTime, fmt, OUTCOME_LABEL, pct, ZONE_LABEL } from "../labels";
 import { useLoad } from "../useLoad";
 
@@ -56,6 +57,8 @@ export default function GameDetailPage() {
           {f.away_prev_games ? ` + ${f.away_prev_games} der Vorsaison (Anteil aktuell ${pct(f.away_weight_current)})` : ""}
         </div>
       </div>
+
+      <LineupCheck gameId={g.id} f={f} overLine={g.line?.over_line} hdpLine={g.line?.hdp_line} homeName={g.home.name} awayName={g.away.name} />
 
       {/* Summen aus Access nur zeigen, solange es keine einzelnen Würfe gibt – sonst widersprüchliche Zahlen */}
       {(g.aggregate_stats?.length ?? 0) > 0 && g.shots.length === 0 && <div className="panel">

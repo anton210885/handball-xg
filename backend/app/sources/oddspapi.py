@@ -137,8 +137,8 @@ class OddsPapiClient:
 
 # ---------- Quoten auslesen ----------
 
-def _closing_price(players, start: datetime | None) -> float | None:
-    """Aktueller Preis (/odds) oder letzter Preis vor Anpfiff (/historical-odds)."""
+def _closing_price(players, start: datetime | None, opening: bool = False) -> float | None:
+    """Aktueller Preis (/odds) oder letzter Preis vor Anpfiff (/historical-odds); mit ``opening`` der erste."""
     p = (players or {}).get("0")
     if isinstance(p, dict):
         # Ein undatierter aktueller Preis ist kein Beleg für eine Vorab-Quote.
@@ -151,11 +151,11 @@ def _closing_price(players, start: datetime | None) -> float | None:
         if start is not None:
             snaps = [s for s in snaps if datetime.fromisoformat(s["createdAt"].replace("Z", "+00:00")) < start]
         if snaps:
-            return snaps[-1].get("price")
+            return snaps[0 if opening else -1].get("price")
     return None
 
 
-def collect_prices(data: dict, markets: dict[str, dict], start: datetime | None) -> dict:
+def collect_prices(data: dict, markets: dict[str, dict], start: datetime | None, opening: bool = False) -> dict:
     """{(Markttyp, Linie, Ausgang): [Preise je Buchmacher]} für die volle Spielzeit."""
     books = data.get("bookmakerOdds") or data.get("bookmakers") or {}
     out: dict = {}
@@ -166,7 +166,7 @@ def collect_prices(data: dict, markets: dict[str, dict], start: datetime | None)
                 continue
             names = {str(o["outcomeId"]): o["outcomeName"] for o in meta["outcomes"]}
             for oid, o in (m.get("outcomes") or {}).items():
-                price = _closing_price(o.get("players"), start)
+                price = _closing_price(o.get("players"), start, opening)
                 if price and price > 1:
                     out.setdefault((meta["marketType"], meta.get("handicap"), names.get(str(oid))), []).append(price)
     return out
@@ -192,9 +192,9 @@ def _main_line(prices: dict, market_type: str, side_a: str, side_b: str):
     return line, round(ma, 3), round(mb, 3)
 
 
-def extract_line(data: dict, markets: dict[str, dict], start: datetime | None) -> dict:
-    """Over-Linie, Handicap und 1X2 – aus Sicht von Teilnehmer 1 bei OddsPapi."""
-    prices = collect_prices(data, markets, start)
+def extract_line(data: dict, markets: dict[str, dict], start: datetime | None, opening: bool = False) -> dict:
+    """Over-Linie, Handicap und 1X2 – aus Sicht von Teilnehmer 1 bei OddsPapi (``opening``: erster Kurs)."""
+    prices = collect_prices(data, markets, start, opening)
     out: dict = {}
     total = _main_line(prices, "totals", "Over", "Under")
     if total:

@@ -1,0 +1,8 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+sqlalchemy>=2.0
+httpx>=0.27
+python-dotenv>=1.0
+beautifulsoup4>=4.12
+openpyxl>=3.1  # Excel-Export der Spiele
+lightgbm>=4.0  # ML-Test-Metrik ml_margin (app/ml_margin.py)
